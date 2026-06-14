@@ -1,0 +1,6 @@
+{
+  "name": "AJN Archive & IPTV Player",
+  "description": "Unified IPTV and AJN Video Archive Player with Playlist Manager, M3U playlist importing, Sirius music overlay, and CORS-free RSS server-side proxying.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

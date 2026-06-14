@@ -1,0 +1,72 @@
+@import "tailwindcss";
+
+@theme {
+  --color-gold: #ffd700;
+  --color-gold-light: #ffec8b;
+  --color-brand-dark: #0f172a;
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #1e293b;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #3b82f6;
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #2563eb;
+}
+
+/* Vinyl disk rotation animation */
+@keyframes spin-vinyl {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-spin-vinyl {
+  animation: spin-vinyl 4s linear infinite;
+}
+
+/* Audio pulse waves animation */
+@keyframes audio-wave {
+  0%, 100% {
+    transform: scaleY(0.4);
+  }
+  50% {
+    transform: scaleY(1.2);
+  }
+}
+
+.animate-wave-1 { animation: audio-wave 0.8s ease-in-out infinite; }
+.animate-wave-2 { animation: audio-wave 0.8s ease-in-out infinite 0.15s; }
+.animate-wave-3 { animation: audio-wave 0.8s ease-in-out infinite 0.3s; }
+.animate-wave-4 { animation: audio-wave 0.8s ease-in-out infinite 0.45s; }
+.animate-wave-5 { animation: audio-wave 0.8s ease-in-out infinite 0.6s; }
+
+/* Custom Segment Tile style */
+.tile-block {
+  background: linear-gradient(90deg, rgba(var(--tile-color-rgb, 59, 130, 246), 0.15) 0%, rgba(15, 23, 42, 0.95) 45%);
+  border-left: 5px solid var(--tile-color, #3b82f6);
+}
+
+.tile-block:hover {
+  background: linear-gradient(90deg, rgba(var(--tile-color-rgb, 59, 130, 246), 0.25) 0%, rgba(30, 41, 59, 0.95) 45%);
+}
+
+.tile-active {
+  background: linear-gradient(90deg, rgba(var(--tile-color-rgb, 59, 130, 246), 0.3) 0%, rgba(15, 43, 61, 0.98) 45%) !important;
+  border-left: 5px solid var(--tile-color, #3b82f6);
+  box-shadow: 0 0 12px rgba(var(--tile-color-rgb, 37, 99, 235), 0.3);
+}
