@@ -1,6 +1,7 @@
 import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
+import { Readable } from "stream";
 
 async function startServer() {
   const app = express();
@@ -68,11 +69,24 @@ async function startServer() {
           show = "War Room";
         } else if (titleLower.includes("sunday night") || titleLower.includes("snl")) {
           show = "Sunday Night Live";
+        } else if (titleLower.includes("ezra") || titleLower.includes("levant") || titleLower.includes("rebel")) {
+          show = "The Ezra Levant Show";
+        } else if (titleLower.includes("genius") || titleLower.includes("geniuses")) {
+          show = "Geniuses";
+        } else if (titleLower.includes("update") || titleLower.includes("news update") || titleLower.includes("digital news")) {
+          show = "News Update";
+        } else if (titleLower.includes("alex") || titleLower.includes("infowars") || titleLower.includes("info wars")) {
+          show = "Alex Jones Show";
         }
 
         // Hour detection
         let hour = "Full Show";
-        const hourMatch = title.match(/Hr\s*(\d)/i) || title.match(/Hour\s*(\d)/i) || title.match(/Part\s*(\d)/i) || title.match(/p\s*(\d)/i);
+        const hourMatch = title.match(/Hr\s*(\d)/i) || 
+                          title.match(/Hour\s*(\d)/i) || 
+                          title.match(/Part\s*(\d)/i) || 
+                          title.match(/p\s*(\d)/i) ||
+                          title.match(/-\s*hr\s*(\d)/i) ||
+                          title.match(/hr\s*(\d)/i);
         if (hourMatch) {
           hour = `Hour ${hourMatch[1]}`;
         }
@@ -103,6 +117,12 @@ async function startServer() {
       return res.status(400).json({ error: "Missing required query parameter: url" });
     }
 
+    const abortController = new AbortController();
+    req.on("close", () => {
+      console.log("[Stream Proxy] Client closed request. Aborting upstream connection.");
+      abortController.abort();
+    });
+
     try {
       const decodedUrl = decodeURIComponent(rawUrl);
       console.log(`[Stream Proxy] Fetching stream: ${decodedUrl}`);
@@ -110,7 +130,8 @@ async function startServer() {
       const response = await fetch(decodedUrl, {
         headers: {
           "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
-        }
+        },
+        signal: abortController.signal
       });
 
       if (!response.ok) {
@@ -125,23 +146,17 @@ async function startServer() {
       res.setHeader("Access-Control-Allow-Origin", "*");
       res.setHeader("Cache-Control", "no-cache");
 
-      // Pass stream body forward
+      // Pass stream body forward with proper backpressure piping
       if (response.body) {
-        const reader = response.body.getReader();
-        const pump = async () => {
-          const { done, value } = await reader.read();
-          if (done) {
-            res.end();
-            return;
-          }
-          res.write(value);
-          await pump();
-        };
-        await pump();
+        Readable.fromWeb(response.body as any).pipe(res);
       } else {
         res.status(500).send("No stream body found");
       }
     } catch (err: any) {
+      if (err.name === "AbortError") {
+        console.log("[Stream Proxy] Connection aborted successfully.");
+        return;
+      }
       console.error(`[Stream Proxy Error] Failed for ${rawUrl}:`, err.message);
       res.status(502).json({ error: "Stream proxy error", details: err.message });
     }

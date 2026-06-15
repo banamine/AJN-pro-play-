@@ -7,6 +7,7 @@ export interface IPTVChannel {
   name: string;
   logo: string | null;
   url: string;
+  group: string;           // Parsed from group-title attribute in M3U #EXTINF line
 }
 
 export interface PlaybackHistoryItem {

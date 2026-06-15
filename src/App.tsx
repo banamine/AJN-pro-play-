@@ -26,11 +26,16 @@ import {
   X, 
   Radio, 
   Tv, 
-  Info 
+  Info,
+  Sparkles,
+  Square,
+  RotateCcw,
+  Repeat
 } from "lucide-react";
 import Hls from "hls.js";
 import { motion, AnimatePresence } from "motion/react";
 import { IPTVChannel, PlaybackHistoryItem, ArchiveEpisode, ColorScheme } from "./types";
+import { buildM3U, buildWeeblyHtml, triggerClientDownload, buildLanguageSeparatedM3U, detectLanguage, buildTVExplorerHtml, buildVidGridHtml, buildPublicIPTVHtml } from "./utils/exportUtils";
 
 // Static Default M3U Playlist Source
 const DEFAULT_M3U = `#EXTM3U
@@ -53,16 +58,212 @@ const HOUR_COLOR_SCHEME: Record<string, { hex: string; rgb: string }> = {
   "default": { hex: "#64748B", rgb: "100, 116, 139" }     // Slate Gray
 };
 
+export const SHOW_THUMBNAILS: Record<string, string> = {
+  "War Room": "/src/assets/images/war_room_1781449197802.jpg",
+  "Alex Jones Show": "/src/assets/images/alex_jones_1781449209765.jpg",
+  "Sunday Night Live": "/src/assets/images/infowars_globe_1781449235778.jpg",
+  "The Ezra Levant Show": "/src/assets/images/ezra_levant_1781449223400.jpg",
+  "Geniuses": "/src/assets/images/geniuses_1781449247776.jpg",
+  "News Update": "/src/assets/images/news_update_1781449258747.jpg",
+  "default": "/src/assets/images/ajn_logo_1781449178665.jpg"
+};
+
+export const getChannelLogo = (channelName: string, originalLogo: string | null): string => {
+  if (originalLogo && originalLogo.trim() !== "" && !originalLogo.includes("placehold.co")) {
+    return originalLogo;
+  }
+  const lower = channelName.toLowerCase();
+  if (lower.includes("war room") || lower.includes("warroom")) {
+    return SHOW_THUMBNAILS["War Room"];
+  }
+  if (lower.includes("ezra") || lower.includes("rebel")) {
+    return SHOW_THUMBNAILS["The Ezra Levant Show"];
+  }
+  if (
+    lower.includes("alex jones") || 
+    lower.includes("infowars") || 
+    lower.includes("info wars") ||
+    lower.includes("alex -") ||
+    /alex\s*-\s*hr/i.test(lower) ||
+    /alex\s*hr/i.test(lower) ||
+    /alex-hr/i.test(lower) ||
+    lower.startsWith("alex ") ||
+    lower === "alex"
+  ) {
+    if (lower.includes("live") || lower.includes("sunday")) {
+      return SHOW_THUMBNAILS["Sunday Night Live"];
+    }
+    return SHOW_THUMBNAILS["Alex Jones Show"];
+  }
+  if (lower.includes("geniuses") || lower.includes("genius")) {
+    return SHOW_THUMBNAILS["Geniuses"];
+  }
+  if (lower.includes("news update") || lower.includes("digital news") || lower.includes("update")) {
+    return SHOW_THUMBNAILS["News Update"];
+  }
+  if (lower.includes("ajn") || lower.includes("network")) {
+    return SHOW_THUMBNAILS["default"];
+  }
+  return originalLogo || "https://placehold.co/40x40/151f38/ffffff?text=📡";
+};
+
+export const getLogoUrl = (showName: string): string => {
+  const localPath = SHOW_THUMBNAILS[showName] || SHOW_THUMBNAILS["default"];
+  return window.location.origin + localPath;
+};
+
+export function HeaderClock() {
+  const [timeStr, setTimeStr] = useState("");
+  const [countdown, setCountdown] = useState("00:00");
+
+  useEffect(() => {
+    const updateTime = () => {
+      const now = new Date();
+      setTimeStr(now.toLocaleTimeString());
+
+      const nextHour = new Date();
+      nextHour.setHours(now.getHours() + 1, 0, 0, 0);
+      const diffMs = nextHour.getTime() - now.getTime();
+      const diffMins = Math.floor(diffMs / 60000);
+      const diffSecs = Math.floor((diffMs % 60000) / 1000);
+      setCountdown(
+        `${String(diffMins).padStart(2, "0")}:${String(diffSecs).padStart(2, "0")}`
+      );
+    };
+
+    updateTime();
+    const interval = setInterval(updateTime, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  return (
+    <div className="hidden sm:flex items-center gap-6 text-xs text-slate-400">
+      <div className="flex items-center gap-2 bg-[#050608] px-4 py-2 rounded-full border border-slate-800/60">
+        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+        <span className="font-semibold text-slate-500 font-mono text-[10px] uppercase tracking-wider">CLOCK:</span>
+        <span className="font-mono text-white tracking-widest">{timeStr || "--:--:--"}</span>
+      </div>
+      <div className="flex items-center gap-2 bg-blue-500/10 px-4 py-2 rounded-full border border-blue-500/10">
+        <span className="text-blue-400 font-bold font-mono text-[10px] uppercase tracking-widest">⏱️ NEXT SEGMENT IN:</span>
+        <span className="font-mono text-white text-xs">{countdown}</span>
+      </div>
+    </div>
+  );
+}
+
+export function PlayerInfoBar({ currentTitle }: { currentTitle: string }) {
+  const [timeStr, setTimeStr] = useState("");
+  const [countdown, setCountdown] = useState("00:00");
+
+  useEffect(() => {
+    const updateTime = () => {
+      const now = new Date();
+      setTimeStr(now.toLocaleTimeString());
+
+      const nextHour = new Date();
+      nextHour.setHours(now.getHours() + 1, 0, 0, 0);
+      const diffMs = nextHour.getTime() - now.getTime();
+      const diffMins = Math.floor(diffMs / 60000);
+      const diffSecs = Math.floor((diffMs % 60000) / 1000);
+      setCountdown(
+        `${String(diffMins).padStart(2, "0")}:${String(diffSecs).padStart(2, "0")}`
+      );
+    };
+
+    updateTime();
+    const interval = setInterval(updateTime, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  return (
+    <div 
+      id="gold-info-bar"
+      className="absolute top-8 left-1/2 -translate-x-1/2 bg-[#080A0F]/90 border border-slate-800 rounded-full px-6 py-3 backdrop-blur-md z-10 flex items-center gap-5 text-slate-300 text-[11px] font-mono tracking-wider shadow-2xl shadow-black/80 font-medium max-w-[90%] truncate shrink-0"
+    >
+      <div className="flex items-center gap-1.5 whitespace-nowrap">
+        <span className="text-[10px] text-slate-500 uppercase font-bold tracking-widest">CLOCK:</span>
+        <span className="text-white tracking-widest">{timeStr || "--:--:--"}</span>
+      </div>
+      <div className="w-[1px] h-3 bg-slate-800"></div>
+      <div className="flex items-center gap-1.5 truncate">
+        <span className="text-[10px] text-blue-400 font-extrabold uppercase tracking-widest">PLAYING:</span>
+        <span className="text-white font-semibold truncate max-w-[180px] md:max-w-[360px]">{currentTitle}</span>
+      </div>
+      <div className="hidden md:flex items-center gap-5">
+        <div className="w-[1px] h-3 bg-slate-800"></div>
+        <div className="flex items-center gap-1.5 whitespace-nowrap">
+          <span className="text-[10px] text-amber-500 font-bold uppercase tracking-widest">⚡ INTRO COUNTDOWN:</span>
+          <span className="text-slate-100">{countdown}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const monthsList = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December"
+];
+
+const getDaysInMonthGrid = (year: number, month: number) => {
+  const firstDayIndex = new Date(year, month, 1).getDay(); // day of week (0-6)
+  const totalDays = new Date(year, month + 1, 0).getDate(); // days in month (e.g. 30 or 31)
+  
+  const grid: { dateStr: string; dayNum: number; isCurrentMonth: boolean }[] = [];
+  
+  // Fill previous month cells
+  const prevMonthTotalDays = new Date(year, month, 0).getDate();
+  for (let i = firstDayIndex - 1; i >= 0; i--) {
+    const dayVal = prevMonthTotalDays - i;
+    const prevMonth = month === 0 ? 11 : month - 1;
+    const prevYear = month === 0 ? year - 1 : year;
+    const dStr = `${prevYear}-${String(prevMonth + 1).padStart(2, "0")}-${String(dayVal).padStart(2, "0")}`;
+    grid.push({
+      dateStr: dStr,
+      dayNum: dayVal,
+      isCurrentMonth: false
+    });
+  }
+
+  // Fill current month cells
+  for (let d = 1; d <= totalDays; d++) {
+    const dStr = `${year}-${String(month + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+    grid.push({
+      dateStr: dStr,
+      dayNum: d,
+      isCurrentMonth: true
+    });
+  }
+
+  // Pad to 42 cells grid
+  const remainingCells = 42 - grid.length;
+  for (let d = 1; d <= remainingCells; d++) {
+    const nextMonth = month === 11 ? 0 : month + 1;
+    const nextYear = month === 11 ? year + 1 : year;
+    const dStr = `${nextYear}-${String(nextMonth + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+    grid.push({
+      dateStr: dStr,
+      dayNum: d,
+      isCurrentMonth: false
+    });
+  }
+
+  return grid;
+};
+
 export default function App() {
   // Navigation & Sidebars State
   const [activeTab, setActiveTab] = useState<"playlist" | "favorites" | "history" | "archive">("playlist");
   const [isLeftSidebarOpen, setIsLeftSidebarOpen] = useState(true);
   const [isRightSidebarOpen, setIsRightSidebarOpen] = useState(false);
   const [theme, setTheme] = useState<"dark" | "light">("dark");
+  const [selectedHtmlTemplate, setSelectedHtmlTemplate] = useState<"tvexplorer" | "vidgrid" | "publiciptv" | "weebly">("tvexplorer");
 
   // IPTV Core Data State
   const [channels, setChannels] = useState<IPTVChannel[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
+  const [sortOption, setSortOption] = useState<"asc" | "desc" | "recent">("recent");
+  const [isEnrichingLogos, setIsEnrichingLogos] = useState(false);
   const [m3uUrlInput, setM3uUrlInput] = useState("");
   const [favorites, setFavorites] = useState<IPTVChannel[]>([]);
   const [history, setHistory] = useState<PlaybackHistoryItem[]>([]);
@@ -73,8 +274,22 @@ export default function App() {
   const [selectedDate, setSelectedDate] = useState<string>("");
   const [currentArchiveIndex, setCurrentArchiveIndex] = useState<number>(0);
   const [feedLoadingStatus, setFeedLoadingStatus] = useState("Unloaded");
-  const [isSiriusOverlayOpen, setIsSiriusOverlayOpen] = useState(false);
+  
+  // Interactive Calendar & Show Filtering states
+  const [calendarYear, setCalendarYear] = useState<number>(new Date().getFullYear());
+  const [calendarMonth, setCalendarMonth] = useState<number>(new Date().getMonth());
+  const [filterShowAlex, setFilterShowAlex] = useState(true);
+  const [filterShowWarRoom, setFilterShowWarRoom] = useState(true);
+  const [filterShowSunday, setFilterShowSunday] = useState(true);
+  const [filterShowOther, setFilterShowOther] = useState(true);
+  const [isSiriusOverlayOpen, setIsSiriusOverlayOpen] = useState(true);
   const [isSiriusPlaying, setIsSiriusPlaying] = useState(false);
+  const [isSiriusLooping, setIsSiriusLooping] = useState(false);
+  const [siriusCurrentTime, setSiriusCurrentTime] = useState(0);
+  const [siriusDuration, setSiriusDuration] = useState(0);
+  const [siriusVisualizerMode, setSiriusVisualizerMode] = useState<"eq" | "wave" | "fire" | "matrix">("eq");
+  const [siriusAudioVolume, setSiriusAudioVolume] = useState(0.45);
+  const [isSiriusMuted, setIsSiriusMuted] = useState(false);
   const [feedSourceUsed, setFeedSourceUsed] = useState("Direct Express Proxy");
 
   // Player Playback Parameters
@@ -87,14 +302,97 @@ export default function App() {
     `[${new Date().toLocaleTimeString()}] System boots successfully.`
   ]);
   const [playerStatus, setPlayerStatus] = useState<"Idle" | "Loading" | "Playing" | "Paused" | "Error">("Idle");
-  const [currentTimeStr, setCurrentTimeStr] = useState("");
-  const [nextHourCountdown, setNextHourCountdown] = useState("00:00");
+  const [playerVolume, setPlayerVolume] = useState<number>(0.85);
+  const [isPlayerMuted, setIsPlayerMuted] = useState<boolean>(false);
 
   // REFS
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const lastSavedTimeRef = useRef<number>(0);
   const hlsRef = useRef<Hls | null>(null);
   const siriusAudioRef = useRef<HTMLAudioElement | null>(null);
+  const siriusCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const siriusCanvasHeightsRef = useRef<number[]>(new Array(120).fill(0));
+  const siriusPeakHeightsRef = useRef<number[]>(new Array(120).fill(0));
+  const siriusPeakDecayRef = useRef<number[]>(new Array(120).fill(0));
+  const siriusPhaseRef = useRef<number>(0);
+
+  // List of state-managed Sirius tracks to cycle through
+  const [siriusPlaylist, setSiriusPlaylist] = useState<Array<{
+    title: string;
+    artist: string;
+    url: string;
+    backups: string[];
+  }>>([
+    {
+      title: "Sirius",
+      artist: "The Alan Parsons Project",
+      url: "https://ia902907.us.archive.org/31/items/capture-25-april-2026-03-06-58-pm-00000/The%20Alan%20Parsons%20Project%20-%20Sirius%20%28Official%20Audio%29.mp3",
+      backups: [
+        "https://archive.org/download/the-alan-parsons-project-sirius_202111/The%20Alan%20Parsons%20Project%20-%20Sirius.mp3",
+        "https://raw.githubusercontent.com/banamine/AJN-Resource-Hub/main/The%20Alan%20Parsons%20Project%20-%20Sirius%20(Official%20Audio).mp3"
+      ]
+    },
+    {
+      title: "Ace of Spades",
+      artist: "LMBSA",
+      url: "https://ia902907.us.archive.org/31/items/capture-25-april-2026-03-06-58-pm-00000/LMBSA%20-%20Ace%20of%20Spades.mp3",
+      backups: [
+        "https://raw.githubusercontent.com/banamine/AJN-Resource-Hub/main/Motorhead%20-%20Ace%20Of%20Spades%20(Official%20Audio).mp3",
+        "https://archive.org/download/motorhead-ace-of-spades-official-audio/Motorhead%20-%20Ace%20Of%20Spades%20%28Official%20Audio%29.mp3"
+      ]
+    },
+    {
+      title: "Remember the Fallen",
+      artist: "LMBSA",
+      url: "https://ia902907.us.archive.org/31/items/capture-25-april-2026-03-06-58-pm-00000/Remember%20the%20Fallen.mp3",
+      backups: [
+        "https://raw.githubusercontent.com/banamine/AJN-Resource-Hub/main/Sodom%20-%20Remember%20The%20Fallen%20(Official%20Audio).mp3",
+        "https://archive.org/download/sodom-remember-the-fallen-official-audio/Sodom%20-%20Remember%20The%20Fallen%20%28Official%20Audio%29.mp3"
+      ]
+    }
+  ]);
+  const [currentSiriusTrackIndex, setCurrentSiriusTrackIndex] = useState<number>(0);
+
+  const siriusPlaylistRef = useRef(siriusPlaylist);
+  siriusPlaylistRef.current = siriusPlaylist;
+
+  const currentSiriusTrackIndexRef = useRef(currentSiriusTrackIndex);
+  currentSiriusTrackIndexRef.current = currentSiriusTrackIndex;
+
+  const siriusBackupIndexRef = useRef<number>(-1);
+  const playSiriusTrackRef = useRef<(index: number) => void>(() => {});
+
   const logsEndRef = useRef<HTMLDivElement | null>(null);
+
+  const getSavedVideoPosition = (url: string): number => {
+    if (!url) return 0;
+    try {
+      const savedJSON = localStorage.getItem("ajn_video_positions");
+      if (savedJSON) {
+        const saved = JSON.parse(savedJSON);
+        return saved[url] || 0;
+      }
+    } catch (e) {
+      console.error("Failed to load video playback position", e);
+    }
+    return 0;
+  };
+
+  const saveVideoPosition = (url: string, time: number, force: boolean = false) => {
+    if (!url) return;
+    const now = Date.now();
+    if (force || now - lastSavedTimeRef.current > 2000) {
+      lastSavedTimeRef.current = now;
+      try {
+        const savedJSON = localStorage.getItem("ajn_video_positions");
+        const saved = savedJSON ? JSON.parse(savedJSON) : {};
+        saved[url] = time;
+        localStorage.setItem("ajn_video_positions", JSON.stringify(saved));
+      } catch (e) {
+        console.error("Failed to save video playback position", e);
+      }
+    }
+  };
 
   // Load Saved Cache on Startup
   useEffect(() => {
@@ -139,45 +437,244 @@ export default function App() {
       } catch (e) {}
     }
 
-    // Initialize Web Audio Object for Alan Parsons Project - Sirius Track
-    const audio = new Audio("https://raw.githubusercontent.com/banamine/AJN-Resource-Hub/main/The%20Alan%20Parsons%20Project%20-%20Sirius%20(Official%20Audio).mp3");
-    audio.loop = true;
-    audio.volume = 0.45;
-    siriusAudioRef.current = audio;
-
-    // Load AJN RSS Archive silencely
+    // Load AJN RSS Archive silently
     loadArchiveFeed(false);
 
     return () => {
       if (hlsRef.current) {
+        hlsRef.current.detachMedia();
         hlsRef.current.destroy();
-      }
-      if (siriusAudioRef.current) {
-        siriusAudioRef.current.pause();
-        siriusAudioRef.current = null;
+        hlsRef.current = null;
       }
     };
   }, []);
 
-  // Update clocks every second
+  // Synchronize index change, delay timing, and loadedmetadata initialization
   useEffect(() => {
-    const clockInterval = setInterval(() => {
-      const now = new Date();
-      setCurrentTimeStr(now.toLocaleTimeString());
+    if (!isSiriusOverlayOpen) {
+      if (siriusAudioRef.current) {
+        siriusAudioRef.current.pause();
+      }
+      setIsSiriusPlaying(false);
+      return;
+    }
 
-      // Countdown to next show segment or hour
-      const nextHour = new Date();
-      nextHour.setHours(now.getHours() + 1, 0, 0, 0);
-      const diffMs = nextHour.getTime() - now.getTime();
-      const diffMins = Math.floor(diffMs / 60000);
-      const diffSecs = Math.floor((diffMs % 60000) / 1000);
-      setNextHourCountdown(
-        `${String(diffMins).padStart(2, "0")}:${String(diffSecs).padStart(2, "0")}`
-      );
-    }, 1000);
+    const audio = siriusAudioRef.current;
+    if (!audio) return;
 
-    return () => clearInterval(clockInterval);
-  }, []);
+    const track = siriusPlaylist[currentSiriusTrackIndex];
+    if (!track) return;
+
+    addLog(`Loading track: '${track.artist} - ${track.title}'...`, "info");
+    
+    // Set standard audio attributes
+    audio.crossOrigin = "anonymous";
+    audio.loop = false; // handle ends manually to transition tracks
+    audio.volume = 0.45;
+
+    // Direct, clean source assignment
+    audio.src = track.url;
+    audio.load();
+
+    const handleLoadedMetadata = () => {
+      addLog(`Native player initialized. Starting 300ms interactive delay...`, "info");
+      // Add 300ms delay to ensure native controls are interactive
+      setTimeout(() => {
+        if (siriusAudioRef.current && isSiriusOverlayOpen) {
+          // Skip introductory silence for dynamic launch
+          if (track.title === "Sirius" && track.artist === "The Alan Parsons Project") {
+            siriusAudioRef.current.currentTime = 30;
+          } else {
+            siriusAudioRef.current.currentTime = 0;
+          }
+          
+          siriusAudioRef.current.play()
+            .then(() => {
+              setIsSiriusPlaying(true);
+              addLog(`Preamble Sound: '${track.artist} - ${track.title}' is playing`, "info");
+            })
+            .catch(() => {
+              addLog("Autoplay paused. Ready for user interaction on native control deck.", "warning");
+            });
+        }
+      }, 300);
+    };
+
+    audio.addEventListener("loadedmetadata", handleLoadedMetadata);
+
+    return () => {
+      audio.removeEventListener("loadedmetadata", handleLoadedMetadata);
+    };
+  }, [currentSiriusTrackIndex, isSiriusOverlayOpen, siriusPlaylist]);
+
+  // HTML5 Canvas 120-bar visualizer rendering loop
+  useEffect(() => {
+    if (!isSiriusOverlayOpen) return;
+
+    let animationId: number;
+    const canvas = siriusCanvasRef.current;
+    if (!canvas) return;
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    // Set high pixel density resolution
+    const width = 480;
+    const height = 80;
+    canvas.width = width;
+    canvas.height = height;
+
+    const render = () => {
+      // Background base
+      ctx.fillStyle = "rgba(6, 8, 14, 1)";
+      ctx.fillRect(0, 0, width, height);
+
+      // Cyber scan gridlines
+      ctx.strokeStyle = "rgba(59, 130, 246, 0.03)";
+      ctx.lineWidth = 1;
+      for (let x = 0; x < width; x += 16) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, height);
+        ctx.stroke();
+      }
+
+      // Fast tempo and pulse multipliers
+      const isPlaying = isSiriusPlaying;
+      let tempoMultiplier = 1.0;
+      if (currentSiriusTrackIndex === 1) tempoMultiplier = 2.0; // Ace of Spades (Motörhead is metal-fast)
+      else if (currentSiriusTrackIndex === 2) tempoMultiplier = 1.35; // Remember the fallen
+
+      if (isPlaying) {
+        siriusPhaseRef.current += 0.08 * tempoMultiplier;
+      } else {
+        siriusPhaseRef.current += 0.015; // smooth idle waves
+      }
+
+      const phase = siriusPhaseRef.current;
+      const numBars = 120;
+      const barWidth = (width / numBars) * 0.85;
+      const gap = (width / numBars) * 0.15;
+
+      for (let i = 0; i < numBars; i++) {
+        let targetHeight = 2.5; // low default peak
+
+        if (isPlaying) {
+          // Mathematically model authentic EQ frequencies on 120 discrete bands
+          let intensity = 0;
+          if (i < 28) {
+            // Bass Region
+            intensity = Math.sin(phase * 1.1 + i * 0.25) * 0.45 + 0.55;
+            intensity += Math.sin(phase * 2.6) * 0.38; // heavy bassline drum kick
+          } else if (i < 88) {
+            // Mid-range
+            intensity = Math.sin(phase * 0.75 + i * 0.07) * 0.5 + 0.5;
+            intensity *= Math.cos(phase * 0.3 + i * 0.035) * 0.65 + 0.35;
+            intensity += Math.abs(Math.sin(phase * 1.6 - i * 0.04)) * 0.16;
+          } else {
+            // High Treble
+            intensity = Math.sin(phase * 1.9 + i * 0.2) * 0.35 + 0.45;
+            intensity += Math.cos(phase * 4.25 - i * 0.25) * 0.24;
+            if (currentSiriusTrackIndex === 1) {
+              intensity += (Math.random() - 0.5) * 0.45; // metallic fuzz
+            }
+          }
+
+          // Random signal interference
+          intensity += (Math.random() - 0.5) * 0.15;
+          intensity = Math.max(0, Math.min(1.0, intensity));
+
+          // Calculate height from volume
+          const currentVol = isSiriusMuted ? 0 : siriusAudioVolume;
+          const masterGain = currentVol / 0.45;
+          targetHeight = intensity * (height - 12) * Math.max(0.15, masterGain);
+          if (targetHeight < 2.5) targetHeight = 2.5;
+        } else {
+          // Standing idle ambient heartbeat wave
+          targetHeight = Math.sin(i * 0.18 + phase) * 2.2 + 3.8;
+        }
+
+        // Apply visual lowpass filter to slow changes down
+        const curHeight = siriusCanvasHeightsRef.current[i] * 0.68 + targetHeight * 0.32;
+        siriusCanvasHeightsRef.current[i] = curHeight;
+
+        // Fall down physics for peak dots
+        if (curHeight > siriusPeakHeightsRef.current[i]) {
+          siriusPeakHeightsRef.current[i] = curHeight;
+          siriusPeakDecayRef.current[i] = 0;
+        } else {
+          siriusPeakDecayRef.current[i] += 0.085;
+          siriusPeakHeightsRef.current[i] -= siriusPeakDecayRef.current[i];
+          if (siriusPeakHeightsRef.current[i] < 0) {
+            siriusPeakHeightsRef.current[i] = 0;
+          }
+        }
+
+        const xPos = i * (barWidth + gap);
+        const peakHeight = siriusPeakHeightsRef.current[i];
+
+        // Custom Gradient selections
+        let gradient: CanvasGradient;
+        if (siriusVisualizerMode === "eq") {
+          gradient = ctx.createLinearGradient(0, height, 0, height - curHeight);
+          gradient.addColorStop(0, "rgba(59, 130, 246, 0.9)");   // pure Blue
+          gradient.addColorStop(0.35, "rgba(99, 102, 241, 0.95)"); // Indigo
+          gradient.addColorStop(0.7, "rgba(147, 51, 234, 1)");    // Purple
+          gradient.addColorStop(1, "rgba(236, 72, 153, 1)");      // Hot Pink
+        } else if (siriusVisualizerMode === "wave") {
+          gradient = ctx.createLinearGradient(0, height, 0, height - curHeight);
+          gradient.addColorStop(0, "rgba(34, 211, 238, 0.4)");  // Cyan translucent
+          gradient.addColorStop(0.5, "rgba(14, 165, 233, 0.85)"); // Sky Sky
+          gradient.addColorStop(1, "rgba(6, 182, 212, 1)");      // Cyan Neon
+        } else if (siriusVisualizerMode === "fire") {
+          gradient = ctx.createLinearGradient(0, height, 0, height - curHeight);
+          gradient.addColorStop(0, "rgba(239, 68, 68, 0.7)");   // blood red
+          gradient.addColorStop(0.5, "rgba(249, 115, 22, 0.95)"); // intense orange
+          gradient.addColorStop(0.85, "rgba(234, 179, 8, 1)");    // bright yellow
+          gradient.addColorStop(1, "rgba(254, 240, 138, 1)");   // gold peak
+        } else {
+          // matrix
+          gradient = ctx.createLinearGradient(0, height, 0, height - curHeight);
+          gradient.addColorStop(0, "rgba(21, 128, 61, 0.8)");  // digital green
+          gradient.addColorStop(0.65, "rgba(34, 197, 94, 0.95)"); // matrix bright green
+          gradient.addColorStop(1, "rgba(220, 252, 231, 1)");   // radioactive white-green
+        }
+
+        ctx.fillStyle = gradient;
+        ctx.beginPath();
+        if (siriusVisualizerMode === "wave") {
+          const centerY = height / 2;
+          const halfH = curHeight / 2;
+          ctx.rect(xPos, centerY - halfH, barWidth, curHeight || 1);
+        } else {
+          ctx.rect(xPos, height - curHeight, barWidth, curHeight);
+        }
+        ctx.fill();
+
+        // Draw Peak Indicator Dots
+        if (peakHeight > 2.5 && siriusVisualizerMode !== "matrix") {
+          ctx.fillStyle = siriusVisualizerMode === "fire" ? "#fef08a" : siriusVisualizerMode === "wave" ? "#22d3ee" : "#ffffff";
+          ctx.beginPath();
+          if (siriusVisualizerMode === "wave") {
+            const centerY = height / 2;
+            ctx.rect(xPos, centerY - (peakHeight / 2) - 1.2, barWidth, 1.2);
+            ctx.rect(xPos, centerY + (peakHeight / 2), barWidth, 1.2);
+          } else {
+            ctx.rect(xPos, height - peakHeight - 2, barWidth, 1.2);
+          }
+          ctx.fill();
+        }
+      }
+
+      animationId = requestAnimationFrame(render);
+    };
+
+    render();
+
+    return () => {
+      cancelAnimationFrame(animationId);
+    };
+  }, [isSiriusOverlayOpen, isSiriusPlaying, currentSiriusTrackIndex, siriusVisualizerMode, siriusAudioVolume, isSiriusMuted]);
 
   // Save Config Preferences
   useEffect(() => {
@@ -193,6 +690,24 @@ export default function App() {
       logsEndRef.current.scrollIntoView({ behavior: "smooth" });
     }
   }, [debugLogs]);
+
+  // Synchronize dynamic volume and mute settings with native video element
+  useEffect(() => {
+    const video = videoRef.current;
+    if (video) {
+      video.volume = playerVolume;
+      video.muted = isPlayerMuted;
+    }
+  }, [playerVolume, isPlayerMuted]);
+
+  // Synchronize Sirius preamble volume and mute states
+  useEffect(() => {
+    const audio = siriusAudioRef.current;
+    if (audio) {
+      audio.volume = siriusAudioVolume;
+      audio.muted = isSiriusMuted;
+    }
+  }, [siriusAudioVolume, isSiriusMuted]);
 
   const addLog = (message: string, type: "info" | "warning" | "error" = "info") => {
     const timestamp = new Date().toLocaleTimeString();
@@ -231,9 +746,11 @@ export default function App() {
       if (line.startsWith("#EXTINF")) {
         const nameMatch = line.match(/,([^,]+)$/);
         const logoMatch = line.match(/tvg-logo="([^"]+)"/i);
+        const groupMatch = line.match(/group-title="([^"]+)"/i);
         currentChannel = {
           name: nameMatch ? nameMatch[1].trim() : "Unnamed Stream",
           logo: logoMatch ? logoMatch[1] : null,
+          group: groupMatch ? groupMatch[1].trim() : "General",
           url: ""
         };
       } else if (line && !line.startsWith("#")) {
@@ -268,25 +785,29 @@ export default function App() {
     reader.readAsText(file);
   };
 
-  const handleM3uUrlLoad = async () => {
-    if (!m3uUrlInput.trim()) return;
-    addLog(`Fetching external M3U playlist from: ${m3uUrlInput}`);
+  const loadCustomM3uUrl = async (urlStr: string) => {
+    addLog(`Fetching external M3U playlist from: ${urlStr}`);
     setFeedLoadingStatus("Fetching M3U...");
 
     try {
       // Fetch directly or via proxy if direct fails
-      let response = await fetch(m3uUrlInput);
+      let response = await fetch(urlStr);
       if (!response.ok) {
         addLog(`Direct M3U load blocked, trying stream proxy...`, "warning");
-        response = await fetch(`/api/stream-proxy?url=${encodeURIComponent(m3uUrlInput)}`);
+        response = await fetch(`/api/stream-proxy?url=${encodeURIComponent(urlStr)}`);
       }
       
       const text = await response.text();
       parseAndLoadM3U(text);
-      setM3uUrlInput("");
     } catch (e: any) {
       addLog(`M3U playlist load failure: ${e.message}`, "error");
     }
+  };
+
+  const handleM3uUrlLoad = async () => {
+    if (!m3uUrlInput.trim()) return;
+    await loadCustomM3uUrl(m3uUrlInput);
+    setM3uUrlInput("");
   };
 
   // AJN RSS Fetch & parsing logic
@@ -399,10 +920,23 @@ export default function App() {
             show = "War Room";
           } else if (titleLower.includes("sunday night") || titleLower.includes("snl")) {
             show = "Sunday Night Live";
+          } else if (titleLower.includes("ezra") || titleLower.includes("levant") || titleLower.includes("rebel")) {
+            show = "The Ezra Levant Show";
+          } else if (titleLower.includes("genius") || titleLower.includes("geniuses")) {
+            show = "Geniuses";
+          } else if (titleLower.includes("update") || titleLower.includes("news update") || titleLower.includes("digital news")) {
+            show = "News Update";
+          } else if (titleLower.includes("alex") || titleLower.includes("infowars") || titleLower.includes("info wars")) {
+            show = "Alex Jones Show";
           }
 
           let hour = "Full Show";
-          const hourMatch = title.match(/Hr\s*(\d)/i) || title.match(/Hour\s*(\d)/i) || title.match(/Part\s*(\d)/i);
+          const hourMatch = title.match(/Hr\s*(\d)/i) || 
+                            title.match(/Hour\s*(\d)/i) || 
+                            title.match(/Part\s*(\d)/i) ||
+                            title.match(/p\s*(\d)/i) ||
+                            title.match(/-\s*hr\s*(\d)/i) ||
+                            title.match(/hr\s*(\d)/i);
           if (hourMatch) {
             hour = `Hour ${hourMatch[1]}`;
           }
@@ -438,21 +972,377 @@ export default function App() {
     }
   };
 
-  // Filter episodes matching the selected date
+  // Sync calendar Month & Year view whenever selectedDate matches a parsed AJN day
+  useEffect(() => {
+    if (selectedDate) {
+      const parts = selectedDate.split("-");
+      if (parts.length === 3) {
+        const y = parseInt(parts[0], 10);
+        const m = parseInt(parts[1], 10) - 1; // 0-indexed calendar month
+        if (!isNaN(y) && !isNaN(m)) {
+          setCalendarYear(y);
+          setCalendarMonth(m);
+        }
+      }
+    }
+  }, [selectedDate]);
+
+  // Filter episodes matching selected date and user-checked show categories
   const selectedDateEpisodes = useMemo(() => {
-    return archiveEpisodes.filter(ep => ep.dateKey === selectedDate);
-  }, [archiveEpisodes, selectedDate]);
+    return archiveEpisodes.filter(ep => {
+      if (ep.dateKey !== selectedDate) return false;
+      const showLower = ep.show.toLowerCase();
+      if (showLower.includes("war room") || showLower.includes("warroom")) {
+        return filterShowWarRoom;
+      }
+      if (showLower.includes("sunday night") || showLower.includes("snl")) {
+        return filterShowSunday;
+      }
+      if (showLower.includes("alex jones") || showLower.includes("alex-special") || showLower.includes("alex show")) {
+        return filterShowAlex;
+      }
+      return filterShowOther;
+    });
+  }, [archiveEpisodes, selectedDate, filterShowAlex, filterShowWarRoom, filterShowSunday, filterShowOther]);
+
+  // Dynamic Playlist Exporters & Downloader hooks
+  const handleExportSelectedM3U = () => {
+    if (selectedDateEpisodes.length === 0) {
+      addLog("No active items parsed/checked on this date to build M3U", "warning");
+      return;
+    }
+    const exportList = selectedDateEpisodes.map(ep => ({
+      title: `${ep.title} (${ep.hour})`,
+      url: ep.videoUrl,
+      duration: 3600,
+      groupTitle: ep.show,
+      tvgLogo: getLogoUrl(ep.show)
+    }));
+    const m3u = buildM3U(exportList, `AJN ${selectedDate}`);
+    triggerClientDownload(m3u, `AJN_${selectedDate}_Episodes.m3u`, "audio/x-mpegurl;charset=utf-8");
+    addLog(`Successfully generated and downloaded .m3u playlist: AJN_${selectedDate}_Episodes.m3u`);
+  };
+
+  const handleExportSelectedJSON = () => {
+    if (selectedDateEpisodes.length === 0) {
+      addLog("No active items parsed/checked on this date to build JSON", "warning");
+      return;
+    }
+    const dataStr = JSON.stringify(selectedDateEpisodes, null, 2);
+    triggerClientDownload(dataStr, `AJN_${selectedDate}_Metadata.json`, "application/json;charset=utf-8");
+    addLog(`Successfully generated and downloaded .json metadata: AJN_${selectedDate}_Metadata.json`);
+  };
+
+  const handleExportAllM3U = () => {
+    if (archiveEpisodes.length === 0) {
+      addLog("Master archiver feed empty; cannot compile full collection M3U", "warning");
+      return;
+    }
+    const exportList = archiveEpisodes.map(ep => ({
+      title: `${ep.title} (${ep.hour}) [${ep.dateKey}]`,
+      url: ep.videoUrl,
+      duration: 3600,
+      groupTitle: `${ep.show} ${ep.dateKey}`,
+      tvgLogo: getLogoUrl(ep.show)
+    }));
+    const m3u = buildM3U(exportList, "AJN Full Archive");
+    triggerClientDownload(m3u, "AJN_Full_Unified_Collection.m3u", "audio/x-mpegurl;charset=utf-8");
+    addLog(`Successfully generated and downloaded master full .m3u playback registry (${archiveEpisodes.length} streams)`);
+  };
+
+  const handleExportSelectedHtmlPlayer = () => {
+    if (selectedDateEpisodes.length === 0) {
+      addLog("No active items parsed/checked on this date to build HTML Player", "warning");
+      return;
+    }
+    const exportList = selectedDateEpisodes.map(ep => ({
+      title: `${ep.title} (${ep.hour})`,
+      url: ep.videoUrl,
+      duration: 3600,
+      groupTitle: ep.show,
+      tvgLogo: getLogoUrl(ep.show)
+    }));
+
+    let htmlContent = "";
+    let filename = `AJN_${selectedDate}_Player.html`;
+    let label = "";
+
+    if (selectedHtmlTemplate === "tvexplorer") {
+      htmlContent = buildTVExplorerHtml(exportList, `AJN - TV Explorer [${selectedDate}]`);
+      filename = `AJN_TVExplorer_${selectedDate}.html`;
+      label = "TV Explorer Sleek Dashboard";
+    } else if (selectedHtmlTemplate === "vidgrid") {
+      htmlContent = buildVidGridHtml(exportList, `AJN - VidGrid Multi-Monitor [${selectedDate}]`);
+      filename = `AJN_VidGrid_${selectedDate}.html`;
+      label = "VidGrid Multi-Monitor Mosaic Wall";
+    } else if (selectedHtmlTemplate === "publiciptv") {
+      htmlContent = buildPublicIPTVHtml(exportList, `AJN - Retro Cinema Player [${selectedDate}]`);
+      filename = `AJN_Classic_TV_${selectedDate}.html`;
+      label = "Public Retro IPTV (Classic TV Bezel)";
+    } else {
+      htmlContent = buildWeeblyHtml(exportList, `AJN - Broadcast Desk [${selectedDate}]`);
+      filename = `AJN_Classic_Loop_${selectedDate}.html`;
+      label = "EPG Classic Sync Loop";
+    }
+
+    triggerClientDownload(htmlContent, filename, "text/html;charset=utf-8");
+    addLog(`Successfully compiled and downloaded standalone page (${label}): ${filename}. Simply open this file on your drive inside any web browser, no server required!`);
+  };
+
+  const handleExportSelectedLanguageM3U = (specificLangCode?: string) => {
+    if (selectedDateEpisodes.length === 0) {
+      addLog("No active items parsed/checked on this date to build Language M3U", "warning");
+      return;
+    }
+    const exportList = selectedDateEpisodes.map(ep => ({
+      title: `${ep.title} (${ep.hour})`,
+      url: ep.videoUrl,
+      duration: 3600,
+      groupTitle: ep.show,
+      tvgLogo: getLogoUrl(ep.show)
+    }));
+
+    if (specificLangCode) {
+      const filtered = exportList.filter(ep => {
+        const { code } = detectLanguage(ep.title, ep.groupTitle);
+        return code === specificLangCode;
+      });
+      const langMap: Record<string, string> = { en: "English", es: "Spanish", ru: "Russian" };
+      const langName = langMap[specificLangCode] || "Other";
+      
+      if (filtered.length === 0) {
+        addLog(`No streams found for language "${langName}" on ${selectedDate}`, "warning");
+        return;
+      }
+      const m3u = buildM3U(filtered, `AJN ${langName} - ${selectedDate}`);
+      triggerClientDownload(m3u, `AJN_${selectedDate}_${langName}.m3u`, "audio/x-mpegurl;charset=utf-8");
+      addLog(`Successfully generated and downloaded separate ${langName} playlist: AJN_${selectedDate}_${langName}.m3u`);
+    } else {
+      const m3u = buildLanguageSeparatedM3U(exportList, `AJN Language [${selectedDate}]`);
+      triggerClientDownload(m3u, `AJN_Language_${selectedDate}_Episodes.m3u`, "audio/x-mpegurl;charset=utf-8");
+      addLog(`Successfully generated and downloaded Language-Separated Day .m3u: AJN_Language_${selectedDate}_Episodes.m3u (English default, Spanish second, Russian third, others alphabetically).`);
+    }
+  };
+
+  const handleExportAllLanguageM3U = (specificLangCode?: string) => {
+    if (archiveEpisodes.length === 0) {
+      addLog("Master archiver feed empty; cannot compile full collection Language M3U", "warning");
+      return;
+    }
+    const exportList = archiveEpisodes.map(ep => ({
+      title: `${ep.title} (${ep.hour}) [${ep.dateKey}]`,
+      url: ep.videoUrl,
+      duration: 3600,
+      groupTitle: ep.show,
+      tvgLogo: getLogoUrl(ep.show)
+    }));
+
+    if (specificLangCode) {
+      const filtered = exportList.filter(ep => {
+        const { code } = detectLanguage(ep.title, ep.groupTitle);
+        return code === specificLangCode;
+      });
+      const langMap: Record<string, string> = { en: "English", es: "Spanish", ru: "Russian" };
+      const langName = langMap[specificLangCode] || "Other";
+
+      if (filtered.length === 0) {
+        addLog(`No streams found for language "${langName}" in Full Unified Collection`, "warning");
+        return;
+      }
+      const m3u = buildM3U(filtered, `AJN ${langName} Full Archive`);
+      triggerClientDownload(m3u, `AJN_Full_${langName}.m3u`, "audio/x-mpegurl;charset=utf-8");
+      addLog(`Successfully generated and downloaded separate ${langName} archive playlist: AJN_Full_${langName}.m3u`);
+    } else {
+      const m3u = buildLanguageSeparatedM3U(exportList, "AJN Language Full Archive");
+      triggerClientDownload(m3u, "AJN_Language_Full_Unified_Collection.m3u", "audio/x-mpegurl;charset=utf-8");
+      addLog(`Successfully generated and downloaded master Language-Separated .m3u of full archive (${archiveEpisodes.length} streams). English, Spanish, Russian, others sorted alphabetically.`);
+    }
+  };
+
+  // ── IPTV CHANNEL EXPORT HANDLERS ─────────────────────────────────────────────
+
+  const handleExportIPTVChannelsHtmlPlayer = () => {
+    const sourceList = filteredChannels.length > 0 ? filteredChannels : channels;
+    if (sourceList.length === 0) {
+      addLog("No channels loaded to export. Load a playlist in the Streams tab first.", "warning");
+      return;
+    }
+    const exportList = sourceList.map(ch => ({
+      title:      ch.name,
+      url:        ch.url,
+      duration:   -1,
+      groupTitle: ch.group,
+      tvgLogo:    ch.logo || ""
+    }));
+
+    let htmlContent = "";
+    let filename    = "IPTV_Export.html";
+    let label       = "";
+
+    if (selectedHtmlTemplate === "tvexplorer") {
+      htmlContent = buildTVExplorerHtml(exportList, "IPTV Streams — TV Explorer");
+      filename    = "IPTV_TVExplorer.html";
+      label       = "TV Explorer Sleek Dashboard";
+    } else if (selectedHtmlTemplate === "vidgrid") {
+      htmlContent = buildVidGridHtml(exportList, "IPTV Streams — VidGrid Multi-Monitor");
+      filename    = "IPTV_VidGrid.html";
+      label       = "VidGrid Multi-Monitor Mosaic Wall";
+    } else if (selectedHtmlTemplate === "publiciptv") {
+      htmlContent = buildPublicIPTVHtml(exportList, "IPTV Streams — Retro Cinema Player");
+      filename    = "IPTV_Classic_TV.html";
+      label       = "Public Retro IPTV (Classic TV Bezel)";
+    } else {
+      htmlContent = buildWeeblyHtml(exportList, "IPTV Streams — Broadcast Desk");
+      filename    = "IPTV_Classic_Loop.html";
+      label       = "EPG Classic Sync Loop";
+    }
+
+    triggerClientDownload(htmlContent, filename, "text/html;charset=utf-8");
+    addLog(
+      `Exported ${sourceList.length} IPTV channels as standalone HTML player (${label}): ${filename}. ` +
+      `Open this file directly in any browser — no server required.`
+    );
+  };
+
+  const handleExportIPTVChannelsM3U = () => {
+    const sourceList = filteredChannels.length > 0 ? filteredChannels : channels;
+    if (sourceList.length === 0) {
+      addLog("No channels loaded to export.", "warning");
+      return;
+    }
+    const exportList = sourceList.map(ch => ({
+      title:      ch.name,
+      url:        ch.url,
+      duration:   -1,
+      groupTitle: ch.group,
+      tvgLogo:    ch.logo || ""
+    }));
+    const m3u = buildM3U(exportList, "IPTV Playlist Export", false);
+    triggerClientDownload(m3u, "IPTV_Channels_Export.m3u", "audio/x-mpegurl;charset=utf-8");
+    addLog(`Exported ${sourceList.length} IPTV channels as M3U: IPTV_Channels_Export.m3u`);
+  };
+
+  const handleExportIPTVChannelsLanguageM3U = (specificLangCode?: string) => {
+    const sourceList = filteredChannels.length > 0 ? filteredChannels : channels;
+    if (sourceList.length === 0) {
+      addLog("No channels loaded. Load a playlist in the Streams tab first.", "warning");
+      return;
+    }
+    const exportList = sourceList.map(ch => ({
+      title:      ch.name,
+      url:        ch.url,
+      duration:   -1,
+      groupTitle: ch.group,
+      tvgLogo:    ch.logo || ""
+    }));
+
+    if (specificLangCode) {
+      const filtered = exportList.filter(ep => {
+        const { code } = detectLanguage(ep.title ?? "", ep.groupTitle ?? "");
+        return code === specificLangCode;
+      });
+      const langMap: Record<string, string> = {
+        en: "English", es: "Spanish", ru: "Russian",
+        fr: "French",  de: "German",  it: "Italian",
+        pt: "Portuguese", ar: "Arabic", zh: "Chinese"
+      };
+      const langName = langMap[specificLangCode] || specificLangCode.toUpperCase();
+      if (filtered.length === 0) {
+        addLog(`No IPTV channels detected as "${langName}". Check group-title values in your M3U.`, "warning");
+        return;
+      }
+      const m3u = buildM3U(filtered, `IPTV ${langName} Channels`, false);
+      triggerClientDownload(m3u, `IPTV_${langName}_Channels.m3u`, "audio/x-mpegurl;charset=utf-8");
+      addLog(`Exported ${filtered.length} ${langName} IPTV channels.`);
+    } else {
+      const m3u = buildLanguageSeparatedM3U(exportList, "IPTV Language-Separated Playlist");
+      triggerClientDownload(m3u, "IPTV_Language_Grouped.m3u", "audio/x-mpegurl;charset=utf-8");
+      addLog(`Exported IPTV playlist grouped by language (${sourceList.length} total channels).`);
+    }
+  };
+
+  const enrichChannelLogosFromIPTVOrg = async () => {
+    if (channels.length === 0) {
+      addLog("No stream channels loaded to enrich. Please load a playlist first!", "warning");
+      return;
+    }
+    setIsEnrichingLogos(true);
+    addLog("Downloading IPTV-org global channel database (https://github.com/iptv-org/api) to match stream names and logos...");
+    
+    try {
+      const response = await fetch("https://iptv-org.github.io/api/channels.json");
+      if (!response.ok) throw new Error("Could not fetch channels database from IPTV-org GitHub backend.");
+      
+      const iptvChannels = await response.json();
+      if (!Array.isArray(iptvChannels)) throw new Error("IPTV-org feed returned an invalid layout.");
+      
+      addLog(`Correlating stream registry against ${iptvChannels.length} official global channels...`);
+
+      const logoMap = new Map<string, string>();
+      for (const item of iptvChannels) {
+        if (item.name && item.logo) {
+          logoMap.set(item.name.toLowerCase().trim(), item.logo);
+        }
+      }
+
+      let matchedCount = 0;
+      const updatedChannels = channels.map(chan => {
+        const cleanName = chan.name.toLowerCase().trim();
+        let matchedLogo = logoMap.get(cleanName);
+        
+        if (!matchedLogo) {
+          for (const item of iptvChannels) {
+            if (item.name && item.logo) {
+              const itemLowerName = item.name.toLowerCase().trim();
+              if (cleanName.includes(itemLowerName) || itemLowerName.includes(cleanName)) {
+                matchedLogo = item.logo;
+                break;
+              }
+            }
+          }
+        }
+
+        if (matchedLogo && chan.logo !== matchedLogo) {
+          matchedCount++;
+          return { ...chan, logo: matchedLogo };
+        }
+        return chan;
+      });
+
+      if (matchedCount > 0) {
+        setChannels(updatedChannels);
+        localStorage.setItem("ajn_iptv_channels", JSON.stringify(updatedChannels));
+        addLog(`Successfully enriched ${matchedCount} stream thumbnails with official match logos from IPTV-org database!`);
+      } else {
+        addLog("Database scan complete: All loaded streams are either fully enriched, or did not match any of the 20,000+ entries in the IPTV-org index.", "info");
+      }
+    } catch (err: any) {
+      addLog(`Failed to scan logo database: ${err.message || err}`, "warning");
+    } finally {
+      setIsEnrichingLogos(false);
+    }
+  };
+
+  const playSiriusTrack = (index: number) => {
+    siriusBackupIndexRef.current = -1; // Reset backup attempts
+    if (!isSiriusOverlayOpen) {
+      setIsSiriusOverlayOpen(true);
+    }
+    setCurrentSiriusTrackIndex(index);
+  };
+
+  playSiriusTrackRef.current = playSiriusTrack;
 
   // Handle Sirius Music Overlay Control
   const startSiriusMusic = async () => {
-    if (siriusAudioRef.current) {
+    if (!isSiriusOverlayOpen) {
+      setIsSiriusOverlayOpen(true);
+    } else if (siriusAudioRef.current && siriusAudioRef.current.paused) {
       try {
-        siriusAudioRef.current.currentTime = 30; // Skipped introductory hums, get straight to Alan Parsons Project synthesizer lead!
         await siriusAudioRef.current.play();
         setIsSiriusPlaying(true);
-        addLog("Preamble Sound: The Alan Parsons Project - 'Sirius' is playing");
       } catch (e: any) {
-        addLog("Audio autoplay blocked by system. Click overlay to trigger.", "warning");
+        addLog("Audio play blocked by browser. Click the native controls play button.", "warning");
       }
     }
   };
@@ -460,9 +1350,45 @@ export default function App() {
   const stopSiriusMusic = () => {
     if (siriusAudioRef.current) {
       siriusAudioRef.current.pause();
-      setIsSiriusPlaying(false);
-      addLog("Sirius preamble background music paused");
     }
+    setIsSiriusPlaying(false);
+    addLog("Sirius preamble background music paused");
+  };
+
+  const handleSiriusNext = () => {
+    addLog("Custom Deck: Skip forward to next preamble track", "info");
+    const nextIndex = (currentSiriusTrackIndex + 1) % siriusPlaylist.length;
+    siriusBackupIndexRef.current = -1;
+    setCurrentSiriusTrackIndex(nextIndex);
+  };
+
+  const handleSiriusPrev = () => {
+    addLog("Custom Deck: Jump backward to previous preamble track", "info");
+    const prevIndex = (currentSiriusTrackIndex - 1 + siriusPlaylist.length) % siriusPlaylist.length;
+    siriusBackupIndexRef.current = -1;
+    setCurrentSiriusTrackIndex(prevIndex);
+  };
+
+  const handleSiriusReplay = () => {
+    addLog("Custom Deck: Restart current track from inception", "info");
+    if (siriusAudioRef.current) {
+      siriusAudioRef.current.currentTime = 0;
+      siriusAudioRef.current.play().catch(() => {});
+      setIsSiriusPlaying(true);
+    }
+  };
+
+  const handleSiriusSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const timeVal = parseFloat(e.target.value);
+    setSiriusCurrentTime(timeVal);
+    if (siriusAudioRef.current) {
+      siriusAudioRef.current.currentTime = timeVal;
+    }
+  };
+
+  const handleSiriusMuteToggle = () => {
+    setIsSiriusMuted(!isSiriusMuted);
+    addLog(!isSiriusMuted ? "Custom Deck: Muting audio output" : "Custom Deck: Unmuting audio output", "info");
   };
 
   const handleCloseOverlayAndPlaySelected = () => {
@@ -506,6 +1432,8 @@ export default function App() {
     if (!video) return;
 
     if (hlsRef.current) {
+      addLog("Memory Leak Prevention: Detaching legacy media and destroying previous HLS instance", "info");
+      hlsRef.current.detachMedia();
       hlsRef.current.destroy();
       hlsRef.current = null;
     }
@@ -513,16 +1441,81 @@ export default function App() {
     const typeToUse = streamType === "auto" ? (url.endsWith(".m3u8") || url.includes("m3u8") ? "hls" : "native") : streamType;
 
     if (typeToUse === "hls" && Hls.isSupported()) {
-      addLog("HLS Engine: Building Hls.js bindings");
+      addLog("HLS Engine: Instantiating high-performance Hls.js segment buffer", "info");
+
+      // Scan connection specifications to prevent memory overflows, visual stalling, or A/V desync
+      const conn = (navigator as any).connection || (navigator as any).mozConnection || (navigator as any).webkitConnection;
+      let targetBufferLength = 30;
+      let targetMaxBufferLength = 60;
+      let maxBufferSizeValue = 50 * 1024 * 1024; // 50MB default
+      let backBufferLen = 90;
+      let networkCategory = "Broadband/WiFi (Default)";
+      let syncSettings = {};
+
+      if (conn) {
+        const type = conn.effectiveType || "4g";
+        const downlink = conn.downlink || 10;
+        const isSaveData = conn.saveData || false;
+
+        if (type === "slow-2g" || type === "2g" || downlink < 1.5 || isSaveData) {
+          networkCategory = `Volatile 2G Network (effectiveType: ${type}, speed: ${downlink}Mbps)`;
+          targetBufferLength = 8;
+          targetMaxBufferLength = 16;
+          maxBufferSizeValue = 8 * 1024 * 1024; // tight 8MB heap to prevent mobile memory pressure crashes
+          backBufferLen = 10; // purge played content immediately to free up RAM
+          syncSettings = {
+            maxBufferHole: 2.0,            // skip structural buffer cracks instead of timing out
+            nudgeMaxRetries: 15,           // keep playhead advancing under spotty feed conditions
+            nudgeOffset: 0.15,             // nudge playhead to bypass black frame stalls
+            highBufferWatchdogPeriod: 2,   // aggressively check A/V drift
+            liveSyncDurationCount: 2,      // pull live streams close to keep sound and frames synced
+          };
+        } else if (type === "3g" || downlink < 4.0) {
+          networkCategory = `Moderate 3G Network (effectiveType: ${type}, speed: ${downlink}Mbps)`;
+          targetBufferLength = 15;
+          targetMaxBufferLength = 30;
+          maxBufferSizeValue = 20 * 1024 * 1024; // 20MB Max
+          backBufferLen = 30;
+          syncSettings = {
+            maxBufferHole: 1.5,
+            nudgeMaxRetries: 10,
+            nudgeOffset: 0.1,
+            highBufferWatchdogPeriod: 3,
+          };
+        } else {
+          networkCategory = `Stable High-Speed Network (${type.toUpperCase()} / ~${downlink} Mbps)`;
+          targetBufferLength = 40;
+          targetMaxBufferLength = 80;
+          maxBufferSizeValue = 65 * 1024 * 1024; // Large 65MB segment stack for silky-smooth seeking/scrubbing
+          backBufferLen = 120; // store back buffer to avoid stutter when repeating content
+          syncSettings = {
+            maxBufferHole: 0.8,
+            nudgeMaxRetries: 5,
+          };
+        }
+      }
+
+      addLog(`Network Optimization: Synced to '${networkCategory}'. Selected buffer threshold = ${targetBufferLength}s, maxBuffer = ${targetMaxBufferLength}s.`, "info");
+
       const hls = new Hls({
-        maxMaxBufferLength: 20, // Low buffering latency
-        enableWorker: true
+        enableWorker: true,
+        maxMaxBufferLength: targetMaxBufferLength,
+        maxBufferLength: targetBufferLength,
+        maxBufferSize: maxBufferSizeValue,
+        lowLatencyMode: false,          // standard buffer mode for VOD & archive stream stability
+        backBufferLength: backBufferLen,
+        ...syncSettings
       });
       hlsRef.current = hls;
       hls.loadSource(url);
       hls.attachMedia(video);
       
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        const savedPos = getSavedVideoPosition(url);
+        if (savedPos > 0) {
+          addLog(`HLS Engine: Seeking automatically to resume point: ${Math.floor(savedPos / 60)}m ${Math.floor(savedPos % 60)}s`, "info");
+          video.currentTime = savedPos;
+        }
         video.play()
           .then(() => setPlayerStatus("Playing"))
           .catch(() => addLog("Awaiting human tap to start play audio"));
@@ -530,12 +1523,38 @@ export default function App() {
 
       hls.on(Hls.Events.ERROR, (event, data) => {
         if (data.fatal) {
-          addLog(`HLS Engine Encountered fatal error: ${data.details}`, "error");
-          handlePlayerError(url, titleStr);
+          switch (data.type) {
+            case Hls.ErrorTypes.NETWORK_ERROR:
+              addLog(`HLS network error encountered: ${data.details}. Attempting automatic pipeline reload...`, "warning");
+              hls.startLoad();
+              break;
+            case Hls.ErrorTypes.MEDIA_ERROR:
+              addLog(`HLS player media decode stutter: ${data.details}. Attempting active frame recovery...`, "warning");
+              hls.recoverMediaError();
+              break;
+            default:
+              addLog(`HLS unrecoverable crash: ${data.details}. Initiating CORS proxy gateway fallback.`, "error");
+              hls.detachMedia();
+              hls.destroy();
+              hlsRef.current = null;
+              handlePlayerError(url, titleStr);
+              break;
+          }
         }
       });
     } else {
       addLog("Native Engine: Mounting direct web player source");
+      
+      const onNativeLoaded = () => {
+        const savedPos = getSavedVideoPosition(url);
+        if (savedPos > 0) {
+          addLog(`Native Engine: Seeking automatically to resume point: ${Math.floor(savedPos / 60)}m ${Math.floor(savedPos % 60)}s`, "info");
+          video.currentTime = savedPos;
+        }
+        video.removeEventListener("loadedmetadata", onNativeLoaded);
+      };
+      video.addEventListener("loadedmetadata", onNativeLoaded);
+
       video.src = url;
       video.load();
       video.play()
@@ -620,7 +1639,8 @@ export default function App() {
   };
 
   const clearAllCache = () => {
-    localStorage.clear();
+    ["ajn_iptv_channels", "ajn_iptv_favorites", "ajn_iptv_history", "ajn_iptv_settings"]
+      .forEach(k => localStorage.removeItem(k));
     setChannels([]);
     setFavorites([]);
     setHistory([]);
@@ -657,54 +1677,60 @@ export default function App() {
     }
   };
 
-  // Filter channels based on search
+  // Filter and sort channels based on search and sortOption
   const filteredChannels = useMemo(() => {
-    if (!searchQuery.trim()) return channels;
-    return channels.filter(c => 
-      c.name.toLowerCase().includes(searchQuery.toLowerCase())
-    );
-  }, [channels, searchQuery]);
+    let result = [...channels];
+    
+    // Filter by search
+    if (searchQuery.trim()) {
+      result = result.filter(c => 
+        c.name.toLowerCase().includes(searchQuery.toLowerCase())
+      );
+    }
+    
+    // Sort options: A-Z, Z-A, or original (recent) order
+    if (sortOption === "asc") {
+      result.sort((a, b) => a.name.localeCompare(b.name));
+    } else if (sortOption === "desc") {
+      result.sort((a, b) => b.name.localeCompare(a.name));
+    }
+    
+    return result;
+  }, [channels, searchQuery, sortOption]);
 
   return (
-    <div id="unified-player-app" className="min-h-screen flex flex-col font-sans transition-all duration-300 antialiased overflow-hidden select-none text-slate-300 bg-[#0B0E14]">
+    <div id="unified-player-app" className={`min-h-screen flex flex-col font-sans transition-all duration-300 antialiased overflow-hidden select-none ${theme === "light" ? "text-slate-800 bg-slate-50" : "text-slate-300 bg-[#0B0E14]"}`}>
       
       {/* HEADER TOP BAR */}
-      <header className="h-20 px-8 flex items-center justify-between border-b border-slate-800/50 bg-[#080A0F]/95 backdrop-blur-md z-30 shrink-0 shadow-lg">
+      <header className={`h-20 px-8 flex items-center justify-between border-b ${theme === "light" ? "border-slate-200 bg-white/95 shadow-sm" : "border-slate-800/50 bg-[#080A0F]/95 shadow-lg"} backdrop-blur-md z-30 shrink-0`}>
         <div className="flex items-center gap-4">
           <button 
             id="btn-sidebar-toggle-left"
             onClick={() => setIsLeftSidebarOpen(!isLeftSidebarOpen)}
-            className="p-2.5 cursor-pointer bg-slate-800/30 hover:bg-slate-800 border border-slate-800/50 rounded-xl text-blue-400 hover:text-white transition-all active:scale-95"
+            className={`p-2.5 cursor-pointer border rounded-xl text-blue-400 hover:text-white transition-all active:scale-95 ${theme === "light" ? "bg-slate-100 hover:bg-slate-200 border-slate-200" : "bg-slate-800/30 hover:bg-slate-800 border-slate-800/50"}`}
             title="Toggle Sidebar Control Panel"
           >
             <Menu className="w-4 h-4" />
           </button>
           
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center font-bold text-white shadow-lg shadow-blue-950/40">
-              A
-            </div>
+            <img 
+              src="/src/assets/images/ajn_logo_1781449178665.jpg" 
+              alt="AJN Logo" 
+              className="w-9 h-9 rounded-xl object-cover shadow-lg shadow-blue-950/20"
+              referrerPolicy="no-referrer"
+            />
             <div>
-              <h1 className="text-sm font-semibold tracking-tight text-white uppercase sm:text-base">
+              <h1 className={`text-sm font-semibold tracking-tight uppercase sm:text-base ${theme === "light" ? "text-slate-900" : "text-white"}`}>
                 AJN Professional Player
               </h1>
-              <p className="text-[10px] text-slate-500 font-semibold tracking-wide">IPTV & Segmented Video Archives</p>
+              <p className={`text-[10px] font-semibold tracking-wide ${theme === "light" ? "text-slate-500" : "text-slate-500"}`}>IPTV & Segmented Video Archives</p>
             </div>
           </div>
         </div>
 
         {/* MIDDLE DISPLAY: TIME & Countdown */}
-        <div className="hidden sm:flex items-center gap-6 text-xs text-slate-400">
-          <div className="flex items-center gap-2 bg-[#050608] px-4 py-2 rounded-full border border-slate-800/60">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-            <span className="font-semibold text-slate-500 font-mono text-[10px] uppercase tracking-wider">CLOCK:</span>
-            <span className="font-mono text-white tracking-widest">{currentTimeStr || "--:--:--"}</span>
-          </div>
-          <div className="flex items-center gap-2 bg-blue-500/10 px-4 py-2 rounded-full border border-blue-500/10">
-            <span className="text-blue-400 font-bold font-mono text-[10px] uppercase tracking-widest">⏱️ NEXT SEGMENT IN:</span>
-            <span className="font-mono text-white text-xs">{nextHourCountdown}</span>
-          </div>
-        </div>
+        <HeaderClock />
 
         {/* UTILITIES (RIGHT) */}
         <div className="flex items-center gap-2">
@@ -723,7 +1749,7 @@ export default function App() {
               setIsSiriusOverlayOpen(true);
               startSiriusMusic();
             }}
-            className="px-4 py-2 text-xs cursor-pointer bg-slate-800/40 hover:bg-blue-600 border border-slate-800 hover:border-blue-500 text-slate-300 hover:text-white rounded-full font-bold transition-all flex items-center gap-2 shadow-sm"
+            className={`px-4 py-2 text-xs cursor-pointer border rounded-full font-bold transition-all flex items-center gap-2 shadow-sm ${theme === "light" ? "bg-slate-100 hover:bg-blue-50 border-slate-200 hover:border-blue-400 text-slate-700 hover:text-blue-600" : "bg-slate-800/40 hover:bg-blue-600 border border-slate-800 hover:border-blue-500 text-slate-300 hover:text-white"}`}
             title="Launch Sirius Sound Overlay"
           >
             <Volume2 className="w-3.5 h-3.5 text-blue-400" />
@@ -733,7 +1759,7 @@ export default function App() {
           <button 
             id="btn-sidebar-toggle-right"
             onClick={() => setIsRightSidebarOpen(!isRightSidebarOpen)}
-            className="p-2.5 cursor-pointer bg-slate-800/30 hover:bg-slate-800 border border-slate-800/50 rounded-xl text-slate-400 hover:text-white transition-all active:scale-95"
+            className={`p-2.5 cursor-pointer border rounded-xl transition-all active:scale-95 ${theme === "light" ? "bg-slate-100 hover:bg-slate-200 border-slate-200 text-slate-700 hover:text-slate-900" : "bg-slate-800/30 hover:bg-slate-800 border-slate-800/50 text-slate-400 hover:text-white"}`}
             title="Toggle Engine Settings"
           >
             <Settings className="w-4 h-4" />
@@ -742,9 +1768,10 @@ export default function App() {
           <button 
             id="btn-theme-toggle"
             onClick={toggleTheme}
-            className="p-2.5 cursor-pointer bg-slate-800/30 hover:bg-slate-800 border border-slate-800/50 rounded-xl text-amber-500 hover:text-white transition-all active:scale-95"
+            className={`p-2.5 cursor-pointer border rounded-xl transition-all active:scale-95 ${theme === "light" ? "bg-slate-100 hover:bg-slate-200 border-slate-200 text-amber-500 hover:text-amber-600" : "bg-slate-800/30 hover:bg-slate-800 border-slate-800/50 text-slate-400 hover:text-white"}`}
+            title={theme === "light" ? "Switch to Dark Mode" : "Switch to Light Mode"}
           >
-            {theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+            {theme === "dark" ? <Moon className="w-4 h-4" /> : <Sun className="w-4 h-4" />}
           </button>
         </div>
       </header>
@@ -759,10 +1786,10 @@ export default function App() {
               initial={{ width: 0, opacity: 0 }}
               animate={{ width: 330, opacity: 1 }}
               exit={{ width: 0, opacity: 0 }}
-              className="h-full bg-[#080A0F] shrink-0 flex flex-col border-r border-slate-800/50 z-20 overflow-hidden"
+              className={`h-full shrink-0 flex flex-col z-20 overflow-hidden border-r ${theme === "light" ? "bg-white border-slate-200" : "bg-[#080A0F] border-slate-800/50"}`}
             >
               {/* TABS SELECTOR */}
-              <div className="p-3 grid grid-cols-4 gap-1 bg-[#06080c] shrink-0 text-slate-500 text-xs font-semibold font-sans border-b border-slate-900">
+              <div className={`p-3 grid grid-cols-4 gap-1 shrink-0 text-slate-500 text-xs font-semibold font-sans border-b ${theme === "light" ? "bg-slate-50 border-slate-200" : "bg-[#06080c] border-slate-900"}`}>
                 {(["playlist", "favorites", "history", "archive"] as const).map(tab => {
                   const isActive = activeTab === tab;
                   const label = tab === "playlist" ? "📡 Streams" 
@@ -775,8 +1802,12 @@ export default function App() {
                       onClick={() => setActiveTab(tab)}
                       className={`py-2 text-center rounded-lg text-[11px] cursor-pointer font-bold transition-all ${
                         isActive 
-                          ? "bg-blue-500/10 text-blue-400 border border-blue-500/20 shadow-sm" 
-                          : "border border-transparent text-slate-500 hover:text-slate-300 hover:bg-slate-800/20"
+                          ? (theme === "light" 
+                              ? "bg-blue-50 text-blue-600 border border-blue-200 shadow-sm" 
+                              : "bg-blue-500/10 text-blue-400 border border-blue-500/20 shadow-sm")
+                          : (theme === "light"
+                              ? "border border-transparent text-slate-500 hover:text-slate-800 hover:bg-slate-100"
+                              : "border border-transparent text-slate-500 hover:text-slate-300 hover:bg-slate-800/20")
                       }`}
                     >
                       {isActive && <span className="mr-0.5">•</span>}
@@ -827,18 +1858,88 @@ export default function App() {
                           />
                         </label>
                       </div>
+
+                      {/* Global Presets quick loader */}
+                      <div className="pt-3 border-t border-slate-800/40 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] text-slate-400 font-bold uppercase font-mono tracking-wider">📺 WORLD CHANNELS DECK</span>
+                          <span className="text-[9px] text-blue-400 font-mono font-bold">IPTV Org / LiveTV</span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-1.5 font-mono">
+                          <button 
+                            onClick={() => loadCustomM3uUrl("https://raw.githubusercontent.com/bugsfreeweb/LiveTVCollector/main/LiveTV/Worldwide/LiveTV.m3u")}
+                            className="p-2 text-[9px] font-bold text-left rounded-xl bg-slate-950 hover:bg-blue-600/10 border border-slate-800/80 hover:border-blue-500/50 text-slate-300 transition-all cursor-pointer truncate"
+                            title="Load LiveTVCollector Global Index"
+                          >
+                            🌍 LiveTV Index
+                          </button>
+                          <button 
+                            onClick={() => loadCustomM3uUrl("https://iptv-org.github.io/iptv/categories/news.m3u")}
+                            className="p-2 text-[9px] font-bold text-left rounded-xl bg-slate-950 hover:bg-blue-600/10 border border-slate-800/80 hover:border-blue-500/50 text-slate-300 transition-all cursor-pointer truncate"
+                            title="Load IPTV-org global curated News channels"
+                          >
+                            📰 Global News TV
+                          </button>
+                          <button 
+                            onClick={() => loadCustomM3uUrl("https://iptv-org.github.io/iptv/categories/movies.m3u")}
+                            className="p-2 text-[9px] font-bold text-left rounded-xl bg-slate-950 hover:bg-blue-600/10 border border-slate-800/80 hover:border-blue-500/50 text-slate-300 transition-all cursor-pointer truncate"
+                            title="Load IPTV-org global Curated Movies & Entertainment list"
+                          >
+                            🎬 Movies & Ent
+                          </button>
+                          <button 
+                            onClick={() => loadDefaultPlaylist()}
+                            className="p-2 text-[9px] font-bold text-left rounded-xl bg-[#0b101c] hover:bg-slate-800 border border-slate-800/40 hover:border-slate-600 text-amber-400 transition-all cursor-pointer truncate"
+                            title="Restore default AJN playlist"
+                          >
+                            ⭐ Default AJN TV
+                          </button>
+                        </div>
+
+                        {/* IPTV Org Thumbnail Enrichment Tool */}
+                        <div className="pt-2">
+                          <button
+                            onClick={enrichChannelLogosFromIPTVOrg}
+                            disabled={isEnrichingLogos || channels.length === 0}
+                            className={`w-full py-1.5 px-3 rounded-xl border font-bold text-[10px] flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                              isEnrichingLogos 
+                                ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400 cursor-not-allowed" 
+                                : "bg-blue-600/10 border-blue-500/20 hover:bg-blue-600 text-blue-400 hover:text-white"
+                            }`}
+                            title="Auto-fetch official high-quality placeholders and stream thumbnails via IPTV-org API database match"
+                          >
+                            <Sparkles className={`w-3 h-3 text-blue-400 ${isEnrichingLogos ? "animate-spin text-emerald-400" : ""}`} />
+                            {isEnrichingLogos ? "Enriching Stream Logos..." : `Enrich ${channels.length} Stream Logos`}
+                          </button>
+                        </div>
+                      </div>
                     </div>
 
-                    {/* Channel Search */}
-                    <div className="relative">
-                      <Search className="w-3.5 h-3.5 text-slate-500 absolute left-4.5 top-3" />
-                      <input 
-                        type="text" 
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                        placeholder="Search channel registry..."
-                        className="w-full pl-10 pr-4 py-2.5 text-xs rounded-2xl border border-slate-800/60 bg-[#050608] focus:border-blue-500/80 text-white placeholder-slate-600 outline-none transition-all"
-                      />
+                    {/* Channel Search & Sorting Dropdown */}
+                    <div className="flex gap-2 items-center">
+                      <div className="relative flex-1">
+                        <Search className="w-3.5 h-3.5 text-slate-500 absolute left-4.5 top-3" />
+                        <input 
+                          type="text" 
+                          value={searchQuery}
+                          onChange={(e) => setSearchQuery(e.target.value)}
+                          placeholder="Search streams..."
+                          className="w-full pl-10 pr-4 py-2.5 text-xs rounded-2xl border border-slate-800/60 bg-[#050608] focus:border-blue-500/80 text-white placeholder-slate-600 outline-none transition-all"
+                        />
+                      </div>
+                      <div className="relative shrink-0">
+                        <select
+                          id="stream-sorting-dropdown"
+                          value={sortOption}
+                          onChange={(e) => setSortOption(e.target.value as any)}
+                          className="pl-3 pr-8 py-2.5 text-xs rounded-2xl border border-slate-800/80 bg-[#050608] hover:border-slate-700/85 text-slate-300 font-bold focus:border-blue-500 transition-all outline-none appearance-none cursor-pointer"
+                        >
+                          <option value="recent">Most Recently Added</option>
+                          <option value="asc">A-Z</option>
+                          <option value="desc">Z-A</option>
+                        </select>
+                        <div className="absolute right-3.5 top-3.5 pointer-events-none text-slate-400 text-[8px]">▼</div>
+                      </div>
                     </div>
 
                     {/* Channels List */}
@@ -871,12 +1972,13 @@ export default function App() {
                                   className="flex-1 min-w-0 flex items-center gap-3"
                                 >
                                   <img 
-                                    src={channel.logo || "https://placehold.co/40x40/151f38/ffffff?text=📡"} 
+                                    src={getChannelLogo(channel.name, channel.logo)} 
                                     alt="logo" 
                                     className="w-8 h-8 rounded-xl border border-slate-800 object-contain shrink-0 bg-[#050608]"
                                     onError={(e) => {
                                       e.currentTarget.src = "https://placehold.co/40x40/151f38/ffffff?text=IPTV";
                                     }}
+                                    referrerPolicy="no-referrer"
                                   />
                                   <div className="truncate">
                                     <h4 className={`text-xs font-semibold leading-tight group-hover:text-blue-400 ${isCurrentlyActive ? "text-blue-400" : "text-slate-200"}`}>
@@ -897,6 +1999,81 @@ export default function App() {
                           })}
                         </div>
                       )}
+                    </div>
+
+                    {/* IPTV CHANNEL EXPORT PANEL — add after channel list */}
+                    <div className="bg-slate-900/20 rounded-2xl border border-slate-800/40 p-4 space-y-3 shadow-md">
+                      <label className="text-[10px] font-bold tracking-wider text-slate-400 uppercase flex items-center gap-1.5 font-mono">
+                        <FileDown className="w-3.5 h-3.5 text-purple-400" />
+                        EXPORT LOADED PLAYLIST
+                      </label>
+
+                      {/* Template selector — mirrors the Archive tab selector */}
+                      <div className="relative">
+                        <select
+                          value={selectedHtmlTemplate}
+                          onChange={(e) => setSelectedHtmlTemplate(e.target.value as any)}
+                          className="w-full pl-3 pr-8 py-2 text-[11px] rounded-xl border border-slate-800 bg-[#050608] hover:border-slate-700 text-slate-300 font-bold focus:border-blue-500 transition-all outline-none appearance-none cursor-pointer"
+                        >
+                          <option value="tvexplorer">⚡ TV Explorer (Sleek Dashboard)</option>
+                          <option value="vidgrid">🔲 VidGrid (Multi-Stream Matrix Wall)</option>
+                          <option value="publiciptv">📺 Public Retro IPTV (TV Cabinet Skin)</option>
+                          <option value="weebly">⏱️ EPG Looping Player (Classic)</option>
+                        </select>
+                        <div className="absolute right-3 top-2.5 pointer-events-none text-slate-500 text-[10px]">▼</div>
+                      </div>
+
+                      {/* HTML export button */}
+                      <button
+                        onClick={handleExportIPTVChannelsHtmlPlayer}
+                        disabled={channels.length === 0}
+                        className="w-full py-2 px-3 text-xs font-bold cursor-pointer text-center bg-purple-600 hover:bg-purple-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-xl border border-purple-500/20 text-white transition-all flex items-center justify-center gap-1.5 shadow-md shadow-purple-500/10"
+                        title="Export all loaded channels as a standalone HTML player page"
+                      >
+                        <FileDown className="w-4 h-4 text-purple-200" />
+                        Export Web Player HTML ({channels.length} channels)
+                      </button>
+
+                      {/* M3U export buttons row */}
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          onClick={handleExportIPTVChannelsM3U}
+                          disabled={channels.length === 0}
+                          className="py-1.5 px-2 text-[10px] font-bold cursor-pointer text-center bg-blue-500/10 hover:bg-blue-600 disabled:opacity-40 rounded-lg border border-blue-500/20 text-blue-300 hover:text-white transition-all flex items-center justify-center gap-1"
+                          title="Export loaded channels as .m3u playlist file"
+                        >
+                          <FileDown className="w-3 h-3" />
+                          Export M3U
+                        </button>
+                        <button
+                          onClick={() => handleExportIPTVChannelsLanguageM3U()}
+                          disabled={channels.length === 0}
+                          className="py-1.5 px-2 text-[10px] font-bold cursor-pointer text-center bg-cyan-500/10 hover:bg-cyan-600 disabled:opacity-40 rounded-lg border border-cyan-500/20 text-cyan-300 hover:text-white transition-all flex items-center justify-center gap-1"
+                          title="Export channels grouped by detected language"
+                        >
+                          <FileDown className="w-3 h-3" />
+                          Language M3U
+                        </button>
+                      </div>
+
+                      {/* Per-language quick export pills */}
+                      <div className="grid grid-cols-3 gap-1 pt-1 border-t border-slate-800/30">
+                        {[
+                          { code: "en", flag: "🇺🇸", label: "EN" },
+                          { code: "es", flag: "🇪🇸", label: "ES" },
+                          { code: "ru", flag: "🇷🇺", label: "RU" },
+                        ].map(({ code, flag, label }) => (
+                          <button
+                            key={code}
+                            onClick={() => handleExportIPTVChannelsLanguageM3U(code)}
+                            disabled={channels.length === 0}
+                            className="py-1 text-[9px] font-extrabold cursor-pointer text-center bg-slate-800/35 hover:bg-blue-600 disabled:opacity-40 rounded border border-slate-800 text-slate-300 hover:text-white transition-all"
+                            title={`Export ${label} channels only`}
+                          >
+                            {flag} {label}
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   </div>
                 )}
@@ -939,10 +2116,11 @@ export default function App() {
                                 className="flex-1 min-w-0 flex items-center gap-3"
                               >
                                 <img 
-                                  src={fav.logo || "https://placehold.co/40x40/151f38/ffffff?text=⭐"} 
+                                  src={getChannelLogo(fav.name, fav.logo)} 
                                   alt="logo" 
                                   className="w-8 h-8 rounded-xl border border-slate-800 object-contain bg-[#050608]"
                                   onError={(e) => { e.currentTarget.src = "https://placehold.co/40x40/151f38/ffffff?text=IPTV"; }}
+                                  referrerPolicy="no-referrer"
                                 />
                                 <div className="truncate">
                                   <h4 className="text-xs font-semibold text-slate-200 truncate leading-tight">{fav.name}</h4>
@@ -1015,54 +2193,280 @@ export default function App() {
                 {activeTab === "archive" && (
                   <div className="space-y-4">
                     
-                    {/* Date Selector */}
-                    <div className="bg-slate-900/20 rounded-2xl border border-slate-800/40 p-4 space-y-3 shadow-md">
+                    {/* Date Selector / Dynamic Interactive Calendar Panel */}
+                    <div className="bg-[#050608]/90 rounded-2xl border border-slate-800 p-4 space-y-3.5 shadow-xl">
                       <div className="flex items-center justify-between">
                         <label className="text-[10px] font-bold tracking-wider text-slate-400 uppercase flex items-center gap-1.5 font-mono">
-                          <Calendar className="w-3.5 h-3.5 text-blue-400" />
-                          ARCHIVE TEMPLATE
+                          <Calendar className="w-3.5 h-3.5 text-blue-400 animate-pulse" />
+                          ARCHIVE CALENDAR DECK
                         </label>
                         <span className="text-[9px] text-emerald-400 font-mono px-2 py-0.5 bg-emerald-500/10 rounded-full border border-emerald-500/20 uppercase font-bold">
                           {feedLoadingStatus}
                         </span>
                       </div>
 
-                      {archiveDates.length === 0 ? (
-                        <div className="py-2 text-[10px] text-slate-500 font-semibold font-mono">
-                          Awaiting sync feed parsing...
-                        </div>
-                      ) : (
-                        <div className="space-y-1.5">
-                          <span className="text-[10px] text-slate-500 font-bold uppercase block font-mono">Select Segment Date:</span>
-                          <select 
-                            value={selectedDate}
-                            onChange={(e) => {
-                              setSelectedDate(e.target.value);
-                              setCurrentArchiveIndex(0);
-                              addLog(`Archive date changed to: ${e.target.value}`);
-                            }}
-                            className="w-full px-3 py-2 text-xs text-white rounded-xl bg-[#050608] border border-slate-800 focus:border-blue-500 outline-none cursor-pointer transition-all"
-                          >
-                            {archiveDates.map(date => (
-                              <option key={date} value={date}>{date} (Daily Segments)</option>
-                            ))}
-                          </select>
-                        </div>
-                      )}
+                      {/* Month Switcher Navigation */}
+                      <div className="flex items-center justify-between bg-slate-900/40 p-2 rounded-xl border border-slate-800/60 font-mono text-xs">
+                        <button 
+                          onClick={() => {
+                            if (calendarMonth === 0) {
+                              setCalendarMonth(11);
+                              setCalendarYear(y => y - 1);
+                            } else {
+                              setCalendarMonth(m => m - 1);
+                            }
+                          }}
+                          className="p-1 px-1.5 rounded bg-[#050608] hover:bg-slate-800 cursor-pointer border border-slate-800 text-slate-400 hover:text-white transition-all font-bold"
+                        >
+                          &lt;
+                        </button>
+                        <span className="font-bold text-white tracking-wide">
+                          {monthsList[calendarMonth]} {calendarYear}
+                        </span>
+                        <button 
+                          onClick={() => {
+                            if (calendarMonth === 11) {
+                              setCalendarMonth(0);
+                              setCalendarYear(y => y + 1);
+                            } else {
+                              setCalendarMonth(m => m + 1);
+                            }
+                          }}
+                          className="p-1 px-1.5 rounded bg-[#050608] hover:bg-slate-800 cursor-pointer border border-slate-800 text-slate-400 hover:text-white transition-all font-bold"
+                        >
+                          &gt;
+                        </button>
+                      </div>
 
+                      {/* Weekday Labels Row */}
+                      <div className="grid grid-cols-7 gap-1 text-[10px] text-slate-500 font-mono font-bold text-center">
+                        <div>Su</div>
+                        <div>Mo</div>
+                        <div>Tu</div>
+                        <div>We</div>
+                        <div>Th</div>
+                        <div>Fr</div>
+                        <div>Sa</div>
+                      </div>
+
+                      {/* 42 cells Calendar Days Grid */}
+                      <div className="grid grid-cols-7 gap-1 text-center">
+                        {getDaysInMonthGrid(calendarYear, calendarMonth).map((cell, idx) => {
+                          const isCurrentActiveSelected = selectedDate === cell.dateStr;
+                          const mappedEpisodes = archiveEpisodes.filter(ep => ep.dateKey === cell.dateStr);
+                          const dayHasEpisodes = mappedEpisodes.length > 0;
+                          
+                          // Style based on state
+                          let cellClass = "p-1 py-1.5 text-xs rounded-lg transition-all font-mono relative cursor-default ";
+                          if (!cell.isCurrentMonth) {
+                            cellClass += "text-slate-700 ";
+                          } else if (dayHasEpisodes) {
+                            cellClass += "text-slate-200 hover:bg-blue-600/25 hover:text-white cursor-pointer font-bold ";
+                          } else {
+                            cellClass += "text-slate-500 opacity-35 ";
+                          }
+
+                          if (isCurrentActiveSelected) {
+                            cellClass = "p-1 py-1.5 text-xs rounded-lg font-mono relative font-black bg-blue-600 text-white shadow-lg cursor-pointer scale-105 border border-blue-400 z-10 ";
+                          }
+
+                          return (
+                            <button
+                              key={idx}
+                              disabled={!dayHasEpisodes}
+                              onClick={() => {
+                                setSelectedDate(cell.dateStr);
+                                setCurrentArchiveIndex(0);
+                                addLog(`Calendar date selected: ${cell.dateStr} (${mappedEpisodes.length} episodes checked)`);
+                              }}
+                              className={cellClass}
+                              title={dayHasEpisodes ? `${mappedEpisodes.length} show segments uploaded` : "No archive data"}
+                            >
+                              <span>{cell.dayNum}</span>
+                              {/* Soft glow dot indicator if there are live episodes and not selected */}
+                              {dayHasEpisodes && !isCurrentActiveSelected && (
+                                <span className="absolute bottom-1 left-1/2 -translate-x-1/2 w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-sm shadow-emerald-500/50"></span>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {/* Active Show Categorizers/Filters */}
+                      <div className="pt-3 border-t border-slate-800/40 space-y-1.5">
+                        <label className="text-[9px] font-bold uppercase tracking-wider text-slate-500 font-mono">Show Filters</label>
+                        <div className="grid grid-cols-2 gap-x-2 gap-y-1.5 text-[10px] font-mono text-slate-400">
+                          <label className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-all">
+                            <input 
+                              type="checkbox" 
+                              checked={filterShowAlex} 
+                              onChange={(e) => setFilterShowAlex(e.target.checked)}
+                              className="rounded border-slate-800 text-blue-500 focus:ring-0 bg-slate-950 cursor-pointer"
+                            />
+                            <span>Alex Jones</span>
+                          </label>
+                          <label className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-all">
+                            <input 
+                              type="checkbox" 
+                              checked={filterShowWarRoom} 
+                              onChange={(e) => setFilterShowWarRoom(e.target.checked)}
+                              className="rounded border-slate-800 text-purple-500 focus:ring-0 bg-slate-950 cursor-pointer"
+                            />
+                            <span>War Room</span>
+                          </label>
+                          <label className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-all">
+                            <input 
+                              type="checkbox" 
+                              checked={filterShowSunday} 
+                              onChange={(e) => setFilterShowSunday(e.target.checked)}
+                              className="rounded border-slate-800 text-emerald-400 focus:ring-0 bg-slate-950 cursor-pointer"
+                            />
+                            <span>Sunday Night</span>
+                          </label>
+                          <label className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-all">
+                            <input 
+                              type="checkbox" 
+                              checked={filterShowOther} 
+                              onChange={(e) => setFilterShowOther(e.target.checked)}
+                              className="rounded border-slate-800 text-slate-400 focus:ring-0 bg-slate-950 cursor-pointer"
+                            />
+                            <span>Specials/Other</span>
+                          </label>
+                        </div>
+                      </div>
+
+                      {/* Playlist Builders / Fast download buttons */}
+                      <div className="pt-3 border-t border-slate-800/40 space-y-3">
+                        <div>
+                          <label className="text-[9px] font-bold uppercase tracking-wider text-slate-400 font-mono block mb-1.5">DATA PLAYLIST EXPORTS</label>
+                          <div className="grid grid-cols-3 gap-1.5">
+                            <button 
+                              onClick={handleExportSelectedM3U}
+                              className="py-1.5 px-1 text-[10px] font-bold cursor-pointer text-center bg-blue-500/10 hover:bg-blue-600 rounded-lg border border-blue-500/20 hover:border-blue-400 text-blue-300 hover:text-white transition-all flex items-center justify-center gap-1"
+                              title="Export selected day as M3U playlist"
+                            >
+                              <FileDown className="w-3 h-3 text-blue-400" />
+                              Day M3U
+                            </button>
+                            <button 
+                              onClick={handleExportSelectedJSON}
+                              className="py-1.5 px-1 text-[10px] font-bold cursor-pointer text-center bg-emerald-500/10 hover:bg-emerald-600 rounded-lg border border-emerald-500/20 hover:border-emerald-400 text-emerald-300 hover:text-white transition-all flex items-center justify-center gap-1"
+                              title="Export selected day's JSON metadata"
+                            >
+                              <FileDown className="w-3 h-3 text-emerald-400" />
+                              Day JSON
+                            </button>
+                            <button 
+                              onClick={handleExportAllM3U}
+                              className="py-1.5 px-1 text-[10px] font-bold cursor-pointer text-center bg-amber-500/10 hover:bg-amber-600 rounded-lg border border-amber-500/20 hover:border-amber-400 text-amber-300 hover:text-white transition-all flex items-center justify-center gap-1"
+                              title="Export entire archive collection as M3U"
+                            >
+                              <FileDown className="w-3 h-3 text-amber-400" />
+                              Full M3U
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Static Embedded HTML players selectors */}
+                        <div className="pt-2 border-t border-slate-800/40 space-y-2">
+                          <label className="text-[9px] font-bold uppercase tracking-wider text-slate-400 font-mono block">STANDALONE WEB PLAYER EXPORTER</label>
+                          <div className="space-y-1.5">
+                            <div className="relative">
+                              <select
+                                value={selectedHtmlTemplate}
+                                onChange={(e) => setSelectedHtmlTemplate(e.target.value as any)}
+                                className="w-full pl-3 pr-8 py-2 text-[11px] rounded-xl border border-slate-800 bg-[#050608] hover:border-slate-700 text-slate-300 font-bold focus:border-blue-500 transition-all outline-none appearance-none cursor-pointer"
+                              >
+                                <option value="tvexplorer">⚡ TV Explorer (Sleek Dashboard)</option>
+                                <option value="vidgrid">🔲 VidGrid (Multi-Stream Matrix Wall)</option>
+                                <option value="publiciptv">📺 Public Retro IPTV (TV Cabinet Skin)</option>
+                                <option value="weebly">⏱️ EPG Looping Player (Classic)</option>
+                              </select>
+                              <div className="absolute right-3 top-2.5 pointer-events-none text-slate-500 text-[10px]">▼</div>
+                            </div>
+                            
+                            <button
+                              onClick={handleExportSelectedHtmlPlayer}
+                              className="w-full py-2 px-3 text-xs font-bold cursor-pointer text-center bg-purple-600 hover:bg-purple-500 rounded-xl border border-purple-500/20 text-white transition-all flex items-center justify-center gap-1.5 shadow-md shadow-purple-500/10 hover:shadow-purple-500/20"
+                              title="Compile active day's playlist into the choosing static template and download standalone file"
+                            >
+                              <FileDown className="w-4 h-4 text-purple-200" />
+                              Export Web Player HTML Page
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Language-Separated Playlists */}
+                      <div className="pt-3 border-t border-slate-800/40">
+                        <label className="text-[9px] font-bold uppercase tracking-wider text-slate-400 font-mono block mb-1">LANGUAGE SEPARATIONS</label>
+                        <div className="space-y-1.5">
+                          <button 
+                            onClick={() => handleExportSelectedLanguageM3U()}
+                            className="w-full py-1.5 px-2 text-[10px] font-bold cursor-pointer text-center bg-cyan-500/10 hover:bg-cyan-600 rounded-lg border border-cyan-500/20 hover:border-cyan-400 text-cyan-300 hover:text-white transition-all flex items-center justify-center gap-1"
+                            title="Export selected day grouped by detected languages (English default, Spanish second, Russian third, others alphabetically)"
+                          >
+                            <FileDown className="w-3 h-3 text-cyan-400" />
+                            Grouped Day M3U
+                          </button>
+                          
+                          <div className="grid grid-cols-3 gap-1">
+                            <button 
+                              onClick={() => handleExportSelectedLanguageM3U("en")}
+                              className="py-1 px-0.5 text-[9px] font-extrabold cursor-pointer text-center bg-slate-800/35 hover:bg-blue-600 rounded border border-slate-800 text-slate-300 hover:text-white transition-all"
+                              title="Download English streams only for this day"
+                            >
+                              🇺🇸 EN
+                            </button>
+                            <button 
+                              onClick={() => handleExportSelectedLanguageM3U("es")}
+                              className="py-1 px-0.5 text-[9px] font-extrabold cursor-pointer text-center bg-slate-800/35 hover:bg-blue-600 rounded border border-slate-800 text-slate-300 hover:text-white transition-all"
+                              title="Download Spanish streams only for this day"
+                            >
+                              🇪🇸 ES
+                            </button>
+                            <button 
+                              onClick={() => handleExportSelectedLanguageM3U("ru")}
+                              className="py-1 px-0.5 text-[9px] font-extrabold cursor-pointer text-center bg-slate-800/35 hover:bg-blue-600 rounded border border-slate-800 text-slate-300 hover:text-white transition-all"
+                              title="Download Russian streams only for this day"
+                            >
+                              🇷🇺 RU
+                            </button>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-1.5 pt-1.5 border-t border-slate-800/20">
+                            <button 
+                              onClick={() => handleExportAllLanguageM3U()}
+                              className="py-1 px-1 text-[9px] font-bold cursor-pointer text-center bg-amber-500/5 hover:bg-amber-600 rounded border border-amber-500/10 hover:border-amber-400 text-amber-300 hover:text-white transition-all flex items-center justify-center gap-1"
+                              title="Download full archive grouped by language"
+                            >
+                              📂 Full Multi
+                            </button>
+                            <button 
+                              onClick={() => handleExportAllLanguageM3U("es")}
+                              className="py-1 px-1 text-[9px] font-bold cursor-pointer text-center bg-purple-500/5 hover:bg-purple-600 rounded border border-purple-500/10 hover:border-purple-400 text-purple-300 hover:text-white transition-all flex items-center justify-center gap-1"
+                              title="Download full archive Spanish streams"
+                            >
+                              🇪🇸 Full ES
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Controls Area */}
                       <div className="pt-3 border-t border-slate-800/40 flex gap-2">
                         <button 
                           onClick={() => loadArchiveFeed(true)}
-                          className="flex-1 py-1.5 px-2 text-[10px] font-bold cursor-pointer text-center bg-slate-800/50 hover:bg-blue-600 rounded-xl border border-slate-700/50 hover:border-blue-500 text-slate-200 transition-all flex items-center justify-center gap-1.5"
+                          className="flex-1 py-1.5 px-2 text-[10px] font-bold cursor-pointer text-center bg-[#0d1527] hover:bg-blue-600 rounded-xl border border-blue-500/20 hover:border-blue-500 text-blue-200 hover:text-white transition-all flex items-center justify-center gap-1.5"
                         >
-                          <RefreshCw className="w-3.5 h-3.5 animate-pulse" />
-                          Reload Feed
+                          <RefreshCw className="w-3.5 h-3.5 animate-pulse text-blue-400" />
+                          Force Sync
                         </button>
 
                         {isSiriusPlaying && (
                           <button 
                             onClick={stopSiriusMusic}
-                            className="py-1.5 px-3 text-[10px] font-extrabold cursor-pointer text-center bg-rose-500/15 hover:bg-rose-600 border border-rose-500/20 text-rose-300 rounded-xl transition-all shrink-0"
+                            className="py-1.5 px-3 text-[10px] font-extrabold cursor-pointer text-center bg-rose-500/15 hover:bg-rose-600 border border-rose-500/20 text-rose-300 rounded-xl transition-all shrink-0 animate-bounce"
                           >
                             Silence
                           </button>
@@ -1081,10 +2485,11 @@ export default function App() {
                           No episodes parsed. Adjust selectors.
                         </div>
                       ) : (
-                        <div className="space-y-2 max-h-[280px] overflow-y-auto pr-1">
+                        <div className="space-y-2 max-h-[340px] overflow-y-auto pr-1">
                           {selectedDateEpisodes.map((ep, idx) => {
                             const isCurrentlySelected = currentArchiveIndex === idx && currentUrl === ep.videoUrl;
                             const colorScheme = HOUR_COLOR_SCHEME[ep.hour] || HOUR_COLOR_SCHEME["default"];
+                            const thumbnailUrl = SHOW_THUMBNAILS[ep.show] || SHOW_THUMBNAILS["default"];
                             
                             return (
                               <div
@@ -1094,28 +2499,53 @@ export default function App() {
                                   "--tile-color": colorScheme.hex,
                                   "--tile-color-rgb": colorScheme.rgb
                                 } as React.CSSProperties}
-                                className={`tile-block p-3.5 rounded-2xl text-left transition-all cursor-pointer relative overflow-hidden border border-slate-800/30 ${
-                                  isCurrentlySelected ? "tile-active shadow-md" : "bg-slate-900/10 hover:bg-slate-900/30"
+                                className={`tile-block p-3 rounded-2xl text-left transition-all cursor-pointer relative overflow-hidden border border-slate-800/35 backdrop-blur-md ${
+                                  isCurrentlySelected 
+                                    ? "tile-active shadow-lg border-blue-500/50 bg-blue-500/5" 
+                                    : "bg-slate-900/20 hover:bg-slate-900/45"
                                 }`}
                               >
-                                <div className="flex justify-between items-center mb-1">
-                                  <span className="text-[9px] font-bold text-slate-400 tracking-wider uppercase bg-slate-950 px-1.5 py-0.5 rounded border border-slate-800">
-                                    {ep.show}
-                                  </span>
-                                  <span 
-                                    style={{ color: colorScheme.hex }}
-                                    className="text-[9px] font-mono font-bold uppercase tracking-wider flex items-center gap-1"
-                                  >
-                                    <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: colorScheme.hex }}></span>
-                                    {ep.hour}
-                                  </span>
-                                </div>
-                                <h4 className="text-xs font-semibold text-slate-200 leading-snug line-clamp-2">
-                                  {ep.title}
-                                </h4>
-                                <div className="mt-2 flex items-center justify-between text-[9px] text-slate-500 font-mono pt-1.5 border-t border-slate-800/40">
-                                  <span>{new Date(ep.pubDate).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
-                                  <span className="text-slate-600 truncate max-w-[120px]">{ep.videoUrl.split("/").pop()}</span>
+                                <div className="flex gap-2.5">
+                                  {/* Thumbnail Preview */}
+                                  <div className="w-20 h-14 rounded-xl overflow-hidden shrink-0 bg-slate-950/80 border border-slate-800/80 relative shadow-inner self-center">
+                                    <img 
+                                      src={thumbnailUrl} 
+                                      alt={ep.show}
+                                      className="w-full h-full object-cover transition-transform duration-500 hover:scale-105"
+                                      referrerPolicy="no-referrer"
+                                    />
+                                    {isCurrentlySelected && (
+                                      <div className="absolute inset-0 bg-blue-600/30 backdrop-blur-[1px] flex items-center justify-center">
+                                        <Play className="w-4 h-4 text-white drop-shadow-md animate-pulse" />
+                                      </div>
+                                    )}
+                                  </div>
+                                  
+                                  {/* Metadata and Title Info */}
+                                  <div className="flex-1 min-w-0 flex flex-col justify-between">
+                                    <div>
+                                      <div className="flex justify-between items-center mb-1 gap-1">
+                                        <span className="text-[8px] font-extrabold text-blue-400 tracking-wider uppercase bg-slate-950/80 px-1.5 py-0.5 rounded border border-slate-800/80 truncate max-w-[100px]">
+                                          {ep.show}
+                                        </span>
+                                        <span 
+                                          style={{ color: colorScheme.hex }}
+                                          className="text-[8px] font-mono font-bold uppercase tracking-wider flex items-center gap-0.5 shrink-0"
+                                        >
+                                          <span className="w-1 h-1 rounded-full animate-ping" style={{ backgroundColor: colorScheme.hex }}></span>
+                                          {ep.hour}
+                                        </span>
+                                      </div>
+                                      <h4 className={`text-[11px] leading-snug font-semibold line-clamp-2 ${isCurrentlySelected ? "text-blue-200" : "text-slate-200"}`}>
+                                        {ep.title}
+                                      </h4>
+                                    </div>
+                                    
+                                    <div className="mt-1.5 flex items-center justify-between text-[8px] text-slate-500 font-mono pt-1 border-t border-slate-800/30">
+                                      <span>{new Date(ep.pubDate).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+                                      <span className="text-slate-600 truncate max-w-[100px]">{ep.videoUrl.split("/").pop()}</span>
+                                    </div>
+                                  </div>
                                 </div>
                               </div>
                             );
@@ -1133,7 +2563,7 @@ export default function App() {
                 )}
 
               </div>
-              <div className="p-3 bg-[#06080c] border-t border-slate-800/60 shrink-0 text-center text-[10px] font-bold text-slate-500 uppercase tracking-widest font-mono">
+              <div className={`p-3 border-t shrink-0 text-center text-[10px] font-bold text-slate-500 uppercase tracking-widest font-mono ${theme === "light" ? "bg-slate-50 border-slate-200" : "bg-[#06080c] border-slate-800/60"}`}>
                 SECURE EDGE BYPASS ENGINE ACTIVE
               </div>
             </motion.aside>
@@ -1141,34 +2571,14 @@ export default function App() {
         </AnimatePresence>
 
         {/* CENTER STAGE: VIDEO PLAYER */}
-        <main className="flex-1 flex flex-col bg-[#0B0E14] overflow-hidden relative">
+        <main className={`flex-1 flex flex-col overflow-hidden relative ${theme === "light" ? "bg-slate-100/70" : "bg-[#0B0E14]"}`}>
           
           {/* PLAYER WORKSPACE */}
           <div className="flex-1 min-h-0 relative flex items-center justify-center p-8">
             
             {/* FLOATING HEADER INFO BAR (Sleek Theme Styling) */}
             {currentUrl && (
-              <div 
-                id="gold-info-bar"
-                className="absolute top-8 left-1/2 -translate-x-1/2 bg-[#080A0F]/90 border border-slate-800 rounded-full px-6 py-3 backdrop-blur-md z-10 flex items-center gap-5 text-slate-300 text-[11px] font-mono tracking-wider shadow-2xl shadow-black/80 font-medium max-w-[90%] truncate shrink-0"
-              >
-                <div className="flex items-center gap-1.5 whitespace-nowrap">
-                  <span className="text-[10px] text-slate-500 uppercase font-bold tracking-widest">CLOCK:</span>
-                  <span className="text-white tracking-widest">{currentTimeStr || "--:--:--"}</span>
-                </div>
-                <div className="w-[1px] h-3 bg-slate-800"></div>
-                <div className="flex items-center gap-1.5 truncate">
-                  <span className="text-[10px] text-blue-400 font-extrabold uppercase tracking-widest">PLAYING:</span>
-                  <span className="text-white font-semibold truncate max-w-[180px] md:max-w-[360px]">{currentTitle}</span>
-                </div>
-                <div className="hidden md:flex items-center gap-5">
-                  <div className="w-[1px] h-3 bg-slate-800"></div>
-                  <div className="flex items-center gap-1.5 whitespace-nowrap">
-                    <span className="text-[10px] text-amber-500 font-bold uppercase tracking-widest">⚡ INTRO COUNTDOWN:</span>
-                    <span className="text-slate-100">{nextHourCountdown}</span>
-                  </div>
-                </div>
-              </div>
+              <PlayerInfoBar currentTitle={currentTitle} />
             )}
 
             {/* VIDEO GRAPHICS ELEMENT - Styled elegantly like active queue */}
@@ -1179,7 +2589,30 @@ export default function App() {
                 ref={videoRef}
                 controls
                 onPlay={handleVideoPlayEvent}
-                onPause={handleVideoPauseEvent}
+                onPause={() => {
+                  handleVideoPauseEvent();
+                  if (videoRef.current) {
+                    saveVideoPosition(currentUrl, videoRef.current.currentTime, true);
+                  }
+                }}
+                onTimeUpdate={(e) => {
+                  const currTime = e.currentTarget.currentTime;
+                  if (currentUrl && currTime > 0) {
+                    saveVideoPosition(currentUrl, currTime);
+                  }
+                }}
+                onEnded={() => {
+                  if (currentUrl) {
+                    try {
+                      const savedJSON = localStorage.getItem("ajn_video_positions");
+                      if (savedJSON) {
+                        const saved = JSON.parse(savedJSON);
+                        delete saved[currentUrl];
+                        localStorage.setItem("ajn_video_positions", JSON.stringify(saved));
+                      }
+                    } catch (e) {}
+                  }
+                }}
                 onError={handleVideoErrorEvent}
                 className="w-full h-full object-contain"
                 poster="https://placehold.co/1280x720/0a0f1d/3b82f6?text=AJN+IPTV+Professional+Player"
@@ -1246,6 +2679,40 @@ export default function App() {
                   >
                     <SkipForward className="w-4 h-4" />
                   </button>
+
+                  {/* Volume Segment Separator */}
+                  <div className="w-[1px] h-5 bg-slate-800"></div>
+
+                  {/* Volume Control Elements */}
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setIsPlayerMuted(!isPlayerMuted)}
+                      className="p-1.5 cursor-pointer hover:bg-slate-800 rounded-full text-slate-300 hover:text-white transition-all"
+                      title={isPlayerMuted ? "Unmute stream audio" : "Mute stream audio"}
+                    >
+                      {isPlayerMuted ? (
+                        <VolumeX className="w-4 h-4 text-red-400" />
+                      ) : (
+                        <Volume2 className="w-4 h-4 text-blue-400" />
+                      )}
+                    </button>
+                    <input
+                      type="range"
+                      min="0"
+                      max="1"
+                      step="0.05"
+                      value={isPlayerMuted ? 0 : playerVolume}
+                      onChange={(e) => {
+                        setPlayerVolume(parseFloat(e.target.value));
+                        if (isPlayerMuted) setIsPlayerMuted(false);
+                      }}
+                      className="w-16 sm:w-20 h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-blue-500 hover:accent-blue-400 transition-all"
+                      title="Adjust Player Volume"
+                    />
+                    <span className="text-[10px] font-mono text-slate-500 font-bold w-6 text-right">
+                      {isPlayerMuted ? "0%" : `${Math.round(playerVolume * 100)}%`}
+                    </span>
+                  </div>
                 </div>
               )}
             </div>
@@ -1256,10 +2723,10 @@ export default function App() {
           {debugMode === "on" && (
             <div 
               id="viewport-debug-console"
-              className="h-28 shrink-0 bg-[#050608] border-t border-slate-800/80 font-mono text-[10px] text-blue-400 p-4 overflow-y-auto space-y-1 selection:bg-blue-900 selection:text-white"
+              className="w-full h-28 shrink-0 bg-[#050608] border-t border-slate-800/80 font-mono text-[10px] text-blue-400 p-4 overflow-y-auto space-y-1 selection:bg-blue-900 selection:text-white"
             >
               {debugLogs.map((log, index) => (
-                <div key={index} className="leading-relaxed hover:bg-slate-900/30">
+                <div key={index} className="leading-relaxed hover:bg-slate-900/30 w-full break-all whitespace-pre-wrap block">
                   {log}
                 </div>
               ))}
@@ -1276,16 +2743,16 @@ export default function App() {
               initial={{ width: 0, opacity: 0 }}
               animate={{ width: 300, opacity: 1 }}
               exit={{ width: 0, opacity: 0 }}
-              className="h-full bg-[#080A0F] shrink-0 border-l border-slate-800/50 p-6 space-y-6 z-20 overflow-y-auto"
+              className={`h-full shrink-0 border-l p-6 space-y-6 z-20 overflow-y-auto ${theme === "light" ? "bg-white border-slate-200 text-slate-800" : "bg-[#080A0F] border-slate-800/50 text-slate-300"}`}
             >
-              <div className="flex items-center justify-between border-b border-slate-800 pb-4">
-                <span className="text-xs font-bold uppercase tracking-widest text-slate-300 flex items-center gap-2 font-mono">
+              <div className={`flex items-center justify-between border-b pb-4 ${theme === "light" ? "border-slate-100" : "border-slate-800"}`}>
+                <span className={`text-xs font-bold uppercase tracking-widest flex items-center gap-2 font-mono ${theme === "light" ? "text-slate-600" : "text-slate-300"}`}>
                   <Activity className="w-4 h-4 text-blue-500" />
                   ENGINE REGISTRY
                 </span>
                 <button 
                   onClick={() => setIsRightSidebarOpen(false)}
-                  className="p-1.5 text-slate-500 hover:text-white cursor-pointer hover:bg-slate-800 rounded-xl transition-all"
+                  className={`p-1.5 cursor-pointer rounded-xl transition-all ${theme === "light" ? "text-slate-400 hover:text-slate-900 hover:bg-slate-100" : "text-slate-500 hover:text-white hover:bg-slate-800"}`}
                 >
                   <X className="w-4 h-4" />
                 </button>
@@ -1417,98 +2884,433 @@ export default function App() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-[#080A0F]/95 backdrop-blur-xl flex flex-col items-center justify-center z-50 p-6 pointer-events-auto"
+            className={`fixed inset-0 backdrop-blur-xl flex flex-col items-center justify-center z-50 p-4 md:p-6 pointer-events-auto transition-all ${
+              theme === "light" ? "bg-slate-900/60" : "bg-[#080A0F]/95"
+            }`}
           >
             <motion.div 
-              initial={{ scale: 0.9, y: 15 }}
+              initial={{ scale: 0.95, y: 15 }}
               animate={{ scale: 1, y: 0 }}
-              exit={{ scale: 0.9, y: 15 }}
-              className="bg-[#0B0E14] border border-slate-800 rounded-3xl p-8 max-w-lg w-full text-center shadow-2xl relative"
+              exit={{ scale: 0.95, y: 15 }}
+              className={`border rounded-3xl p-5 md:p-6 lg:p-8 max-w-4xl w-full text-center md:text-left shadow-2xl relative flex flex-col md:flex-row gap-6 md:gap-8 items-stretch overflow-y-auto md:overflow-visible max-h-[92vh] md:max-h-none ${
+                theme === "light" ? "bg-white border-slate-200 text-slate-800" : "bg-[#0B0E14] border-slate-800 text-slate-300"
+              }`}
             >
+              {/* Close Button X */}
               <button 
                 onClick={stopSiriusMusic}
-                className="absolute top-4 right-4 p-1.5 text-slate-400 hover:text-white bg-slate-900/50 hover:bg-slate-800 border border-slate-800 rounded-full cursor-pointer transition-all active:scale-95"
+                className={`absolute top-4 right-4 p-1.5 border rounded-full cursor-pointer transition-all active:scale-95 z-30 ${
+                  theme === "light"
+                    ? "text-slate-500 hover:text-slate-800 bg-slate-100 hover:bg-slate-200 border-slate-200"
+                    : "text-slate-400 hover:text-white bg-slate-900/50 hover:bg-slate-800 border-slate-800"
+                }`}
                 title="Silence Preamble"
               >
                 <X className="w-4 h-4" />
               </button>
 
-              {/* 1. SPINNING VINTAGE VINYL INNER */}
-              <div className="relative w-36 h-36 mx-auto mb-6 flex items-center justify-center">
+              {/* LEFT COMPACT SECTION: Track Visual Info */}
+              <div className="flex flex-col justify-between md:w-5/12 space-y-4 md:space-y-6 shrink-0 relative pr-0 md:pr-4 md:border-r border-slate-200 dark:border-slate-800/40">
                 
-                {/* Outward Vinyl groove lines */}
-                <div className={`w-36 h-36 rounded-full bg-[#05080f] border-4 border-slate-800 flex items-center justify-center relative shadow-black/80 shadow-xl ${
-                  isSiriusPlaying ? "animate-spin-vinyl" : ""
-                }`}>
-                  
-                  {/* Internal tracks highlights */}
-                  <div className="w-28 h-28 rounded-full border border-slate-700/60 flex items-center justify-center animate-pulse">
-                    <div className="w-20 h-20 rounded-full border border-slate-700/60 flex items-center justify-center bg-[#070c14]">
-                      
-                      {/* Central label */}
-                      <div className="w-10 h-10 rounded-full bg-blue-600 border border-slate-900 flex items-center justify-center font-bold text-[9px] text-white tracking-tighter">
-                        AJN_LP
+                {/* Visualizer header or vinyl block */}
+                <div className="flex flex-row md:flex-col items-center gap-4 md:gap-5 mt-2">
+                  {/* Spinning vinyl disc - slightly smaller to be shorter */}
+                  <div className="relative w-20 h-20 md:w-28 md:h-28 flex-shrink-0 flex items-center justify-center">
+                    <div className={`w-20 h-20 md:w-28 md:h-28 rounded-full border-4 flex items-center justify-center relative shadow-black/80 shadow-lg transition-colors ${
+                      theme === "light" ? "bg-slate-900 border-slate-300" : "bg-[#05080f] border-slate-800"
+                    } ${isSiriusPlaying ? "animate-spin-vinyl" : ""}`}>
+                      <div className="w-16 h-16 md:w-22 md:h-22 rounded-full border border-slate-700/40 flex items-center justify-center">
+                        <div className={`w-10 h-10 md:w-14 md:h-14 rounded-full border flex items-center justify-center ${
+                          theme === "light" ? "bg-slate-800 border-slate-700" : "bg-[#070c14] border-slate-700/60"
+                        }`}>
+                          <div className="w-6 h-6 rounded-full bg-blue-600 border border-slate-900 flex items-center justify-center font-bold text-[8px] md:text-[9px] text-white tracking-tighter">
+                            AJN_LP
+                          </div>
+                        </div>
                       </div>
+                    </div>
+                    {/* Stylus needle */}
+                    <div className="absolute top-0 right-1 w-8 h-14 origin-top rotate-[22deg] pointer-events-none hidden md:block">
+                      <div className="w-1 h-12 bg-slate-400 rounded-full relative">
+                        <div className="w-2 h-2 bg-slate-300 border border-slate-600 rounded-md absolute -bottom-1 -left-0.5"></div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Title & Badge */}
+                  <div className="text-left flex-1 md:text-center md:space-y-2">
+                    <span className="inline-block text-[9px] font-bold tracking-widest text-blue-600 dark:text-[#5c98ff] bg-blue-600/10 dark:bg-blue-900/20 px-2.5 py-0.5 rounded-full border border-blue-500/10">
+                      🎵 PREAMBLE ACTIVE
+                    </span>
+                    <h2 className={`text-sm md:text-base font-bold uppercase tracking-wider line-clamp-2 ${
+                      theme === "light" ? "text-slate-900" : "text-white"
+                    }`}>
+                      {siriusPlaylist[currentSiriusTrackIndex]?.artist} · {siriusPlaylist[currentSiriusTrackIndex]?.title}
+                    </h2>
+                    
+                    {/* Track Dots Indicator */}
+                    <div className="flex md:justify-center gap-1.5 mt-1">
+                      {siriusPlaylist.map((_, i) => (
+                        <button
+                          key={i}
+                          onClick={() => {
+                            setCurrentSiriusTrackIndex(i);
+                            playSiriusTrack(i);
+                          }}
+                          className={`w-2 h-2 rounded-full cursor-pointer transition-all ${
+                            i === currentSiriusTrackIndex 
+                              ? "bg-blue-500 w-4" 
+                              : "bg-slate-300 dark:bg-slate-700 hover:bg-slate-400 dark:hover:bg-slate-500"
+                          }`}
+                          title={`${siriusPlaylist[i].artist} - ${siriusPlaylist[i].title}`}
+                        />
+                      ))}
                     </div>
                   </div>
                 </div>
 
-                {/* Stylus needle hook */}
-                <div className="absolute top-0 right-2 w-10 h-20 origin-top rotate-[20deg] pointer-events-none">
-                  <div className="w-1.5 h-16 bg-slate-400 rounded-full relative">
-                    <div className="w-3 h-3 bg-slate-300 border border-slate-600 rounded-md absolute -bottom-1.5 -left-0.5"></div>
-                  </div>
-                </div>
-              </div>
-
-              {/* 2. AUDIO WAVE INDICATOR LINES */}
-              {isSiriusPlaying && (
-                <div className="h-6 flex items-center justify-center gap-1 mb-4 select-none">
-                  <div className="w-1 h-5 bg-blue-500 rounded animate-wave-1"></div>
-                  <div className="w-1 h-5 bg-blue-400 rounded animate-wave-2"></div>
-                  <div className="w-1 h-5 bg-indigo-500 rounded animate-wave-3"></div>
-                  <div className="w-1 h-5 bg-[#3B82F6] rounded animate-wave-4"></div>
-                  <div className="w-1 h-5 bg-[#8B5CF6] rounded animate-wave-5"></div>
-                </div>
-              )}
-
-              {/* TITLE */}
-              <div className="space-y-2">
-                <span className="text-[10px] font-bold tracking-widest text-[#5c98ff] uppercase bg-blue-900/20 px-3 py-1 rounded-full border border-blue-500/10">
-                  🎵 Broadcast Preamble Theme Active
-                </span>
-                <h2 className="text-xl font-bold text-white uppercase tracking-wider">
-                  The Alan Parsons Project · Sirius
-                </h2>
-                <p className="text-xs text-slate-400 max-w-sm mx-auto leading-relaxed">
+                {/* Subtitle description - small on desktop, hidden on mobile to protect space */}
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed hidden md:block select-none">
                   The classic broadcast countdown anthem is selected and loaded from network hub. Ready to transition instantly to active stream chunks.
                 </p>
+
+                {/* PRIMARY ACTION BUTTONS (Snugly set inside the left segment) */}
+                <div className="flex flex-col gap-1.5 pt-2 border-t border-slate-200 dark:border-slate-800/40">
+                  <button 
+                    onClick={handleCloseOverlayAndPlaySelected}
+                    className="w-full py-2.5 bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-[11px] text-white font-extrabold uppercase rounded-xl cursor-pointer transition-all shadow-md shadow-blue-950/20 flex items-center justify-center gap-1.5"
+                  >
+                    🚀 LAUNCH STREAM SOURCE
+                  </button>
+                  
+                  {isSiriusPlaying ? (
+                    <button 
+                      onClick={stopSiriusMusic}
+                      className="w-full py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-[10px] font-bold text-slate-600 dark:text-slate-300 rounded-lg cursor-pointer transition-all"
+                    >
+                      Mute Preamble Output
+                    </button>
+                  ) : (
+                    <button 
+                      onClick={startSiriusMusic}
+                      className="w-full py-2 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950 dark:hover:bg-blue-900 text-[10px] font-bold text-blue-600 dark:text-blue-400 rounded-lg cursor-pointer transition-all"
+                    >
+                      Resume Preamble Preview
+                    </button>
+                  )}
+                </div>
               </div>
 
-              {/* CONTROL BUTTONS */}
-              <div className="mt-6 flex flex-col gap-2">
-                <button 
-                  onClick={handleCloseOverlayAndPlaySelected}
-                  className="w-full py-3.5 bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-xs text-white font-bold uppercase rounded-xl cursor-pointer transition-all shadow-lg shadow-blue-900/20"
-                >
-                  ▶️ Close Music & Play Direct Stream
-                </button>
+              {/* RIGHT EXPANSIVE SECTION: Audio Mixer Console & Spectrum Visualizer */}
+              <div className="flex-1 flex flex-col justify-between space-y-3 min-w-0 md:pl-2">
+                
+                {/* Console header */}
+                <div className="flex justify-between items-center select-none pt-2 md:pt-0">
+                  <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest font-mono flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-ping" />
+                    Advanced EQ Console
+                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[9px] font-mono text-slate-500 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 px-1.5 py-0.5 rounded">
+                      120 BAND
+                    </span>
+                    <span className={`text-[10px] font-extrabold font-mono uppercase px-2 py-0.5 rounded-md border transition-all ${
+                      isSiriusPlaying 
+                        ? "text-green-500 bg-green-500/10 border-green-500/20 dark:text-green-400" 
+                        : "text-slate-500 bg-slate-100 dark:bg-slate-950 border-slate-200 dark:border-slate-800/40"
+                    }`}>
+                      {isSiriusPlaying ? "STABILIZED" : "STANDBY"}
+                    </span>
+                  </div>
+                </div>
 
-                {isSiriusPlaying ? (
-                  <button 
-                    onClick={stopSiriusMusic}
-                    className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-300 rounded-lg cursor-pointer transition-all"
+                {/* Dropdown select track source */}
+                <div className="flex gap-2 items-center">
+                  <span className="text-[10px] font-bold text-slate-500 tracking-wider uppercase font-mono select-none">
+                    Select Feed:
+                  </span>
+                  <select
+                    value={currentSiriusTrackIndex}
+                    onChange={(e) => playSiriusTrack(Number(e.target.value))}
+                    className={`flex-1 py-1.5 px-3 rounded-lg border text-xs font-bold font-mono focus:outline-none focus:border-blue-500/50 cursor-pointer select-none ${
+                      theme === "light"
+                        ? "bg-white border-slate-200 text-slate-700"
+                        : "bg-slate-900 border-slate-800 text-slate-300"
+                    }`}
                   >
-                    Silence Music Preamble
-                  </button>
-                ) : (
-                  <button 
-                    onClick={startSiriusMusic}
-                    className="w-full py-2 bg-blue-950 hover:bg-blue-900 text-xs font-bold text-blue-400 rounded-lg cursor-pointer transition-all"
+                    {siriusPlaylist.map((st, sidx) => (
+                      <option key={sidx} value={sidx}>
+                        {sidx + 1}. {st.artist} - {st.title}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Spectrum OLED display */}
+                <div className="relative group rounded-xl overflow-hidden border border-slate-200 dark:border-slate-900 shadow-inner">
+                  <canvas
+                    ref={siriusCanvasRef}
+                    className="w-full h-20 md:h-24 block cursor-pointer bg-[#06080e]"
+                    title="Click here to cycle spectrum styles!"
+                    onClick={() => {
+                      const modes: Array<"eq" | "wave" | "fire" | "matrix"> = ["eq", "wave", "fire", "matrix"];
+                      const currentIdx = modes.indexOf(siriusVisualizerMode);
+                      const nextMode = modes[(currentIdx + 1) % modes.length];
+                      setSiriusVisualizerMode(nextMode);
+                      addLog(`Visualizer mode cycled to ${nextMode.toUpperCase()}`, "info");
+                    }}
+                  />
+                  
+                  {/* Subtle watermarked overlay */}
+                  <div className="absolute bottom-1 right-2 pointer-events-none select-none">
+                    <span className="text-[8px] tracking-widest font-mono text-slate-500/40 uppercase">
+                      STYLE: {siriusVisualizerMode.toUpperCase()}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Hidden Audio Stream Element */}
+                <audio
+                  ref={siriusAudioRef}
+                  src={siriusPlaylist[currentSiriusTrackIndex]?.url}
+                  crossOrigin="anonymous"
+                  className="hidden"
+                  onPlay={() => setIsSiriusPlaying(true)}
+                  onPause={() => setIsSiriusPlaying(false)}
+                  onTimeUpdate={(e) => setSiriusCurrentTime(e.currentTarget.currentTime)}
+                  onDurationChange={(e) => setSiriusDuration(e.currentTarget.duration || 0)}
+                  onEnded={() => {
+                    if (isSiriusLooping) {
+                      addLog("Custom Deck: Track looping enabled. Replaying...", "info");
+                      if (siriusAudioRef.current) {
+                        siriusAudioRef.current.currentTime = 0;
+                        siriusAudioRef.current.play().catch(() => {});
+                      }
+                    } else {
+                      addLog("Custom Deck: Track ended. Auto advancing.", "info");
+                      handleSiriusNext();
+                    }
+                  }}
+                  onError={() => {
+                    const currentIndex = currentSiriusTrackIndex;
+                    const track = siriusPlaylist[currentIndex];
+                    if (!track) return;
+                    
+                    const nextBackupIndex = siriusBackupIndexRef.current + 1;
+                    if (track.backups && nextBackupIndex < track.backups.length) {
+                      const backupUrl = track.backups[nextBackupIndex];
+                      siriusBackupIndexRef.current = nextBackupIndex;
+                      addLog(`Primary source failed. Retrying backup: #${nextBackupIndex + 1}...`, "warning");
+                      if (siriusAudioRef.current) {
+                        siriusAudioRef.current.src = backupUrl;
+                        siriusAudioRef.current.load();
+                        siriusAudioRef.current.play().catch(() => {});
+                      }
+                    } else {
+                      addLog(`All sources for track '${track.title}' failed. Moving automatically to next playlist track...`, "error");
+                      handleSiriusNext();
+                    }
+                  }}
+                />
+
+                {/* SEEK TIMELINE TRACKER */}
+                <div className="space-y-1">
+                  <input
+                    type="range"
+                    min={0}
+                    max={siriusDuration || 100}
+                    value={siriusCurrentTime}
+                    onChange={handleSiriusSeek}
+                    className="accent-blue-500 w-full h-1 bg-slate-200 dark:bg-slate-900 hover:bg-slate-300 dark:hover:bg-slate-800 rounded-lg appearance-none cursor-pointer hover:accent-blue-400 transition"
+                  />
+                  <div className="flex justify-between items-center text-[10px] font-mono font-bold text-slate-400 dark:text-slate-500 px-0.5 select-none">
+                    <span>
+                      {(() => {
+                        const sec = siriusCurrentTime;
+                        if (isNaN(sec) || !isFinite(sec)) return "00:00";
+                        const m = Math.floor(sec / 60);
+                        const s = Math.floor(sec % 60);
+                        return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+                      })()}
+                    </span>
+                    <span>
+                      {(() => {
+                        const sec = siriusDuration;
+                        if (isNaN(sec) || !isFinite(sec)) return "00:00";
+                        const m = Math.floor(sec / 60);
+                        const s = Math.floor(sec % 60);
+                        return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+                      })()}
+                    </span>
+                  </div>
+                </div>
+
+                {/* MIXER BUTTON DECK */}
+                <div className="flex justify-between items-center gap-1.5 border-t border-b border-slate-200/60 dark:border-slate-900/60 py-2 select-none">
+                  <button
+                    onClick={handleSiriusPrev}
+                    className={`p-2 border rounded-xl cursor-pointer active:scale-95 transition-all flex items-center justify-center shrink-0 ${
+                      theme === "light"
+                        ? "text-slate-600 hover:text-slate-900 bg-slate-50 border-slate-200 hover:border-slate-300"
+                        : "text-slate-400 hover:text-white bg-slate-900/40 hover:bg-slate-800/80 border-slate-800/60"
+                    }`}
+                    title="Previous Track"
                   >
-                    Resume Prelude Theme
+                    <SkipBack className="w-3.5 h-3.5" />
                   </button>
-                )}
+
+                  <button
+                    onClick={handleSiriusReplay}
+                    className={`p-2 border rounded-xl cursor-pointer active:scale-95 transition-all flex items-center justify-center shrink-0 ${
+                      theme === "light"
+                        ? "text-slate-600 hover:text-slate-900 bg-slate-50 border-slate-200 hover:border-slate-300"
+                        : "text-slate-400 hover:text-white bg-slate-900/40 hover:bg-slate-800/80 border-slate-800/60"
+                    }`}
+                    title="Replay from Beginning"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                  </button>
+
+                  {/* Play controller clicker */}
+                  <button
+                    onClick={isSiriusPlaying ? stopSiriusMusic : startSiriusMusic}
+                    className={`flex-1 py-1.5 px-3 rounded-xl cursor-pointer font-bold text-[10px] uppercase flex items-center justify-center gap-1.5 active:scale-[0.98] transition-all border shadow ${
+                      isSiriusPlaying 
+                        ? "bg-blue-600 hover:bg-blue-500 border-blue-500 text-white shadow-blue-500/10" 
+                        : "bg-emerald-600 hover:bg-emerald-500 border-emerald-500 text-white shadow-emerald-500/10"
+                    }`}
+                    title={isSiriusPlaying ? "Pause Audio" : "Play Audio"}
+                  >
+                    {isSiriusPlaying ? (
+                      <>
+                        <Pause className="w-3.5 h-3.5 fill-white" />
+                        <span>PAUSE</span>
+                      </>
+                    ) : (
+                      <>
+                        <Play className="w-3.5 h-3.5 fill-white animate-pulse" />
+                        <span>PLAY</span>
+                      </>
+                    )}
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      stopSiriusMusic();
+                      if (siriusAudioRef.current) {
+                        siriusAudioRef.current.currentTime = 0;
+                      }
+                      setSiriusCurrentTime(0);
+                    }}
+                    className={`p-2 border rounded-xl cursor-pointer active:scale-95 transition-all flex items-center justify-center shrink-0 ${
+                      theme === "light"
+                        ? "text-rose-500 hover:text-white hover:bg-rose-500/10 hover:border-rose-300 border-slate-200"
+                        : "text-rose-400 hover:text-white hover:bg-rose-950/20 hover:border-rose-500/40 border-slate-800/60"
+                    }`}
+                    title="Stop Audio File"
+                  >
+                    <Square className="w-3.5 h-3.5 fill-current" />
+                  </button>
+
+                  <button
+                    onClick={handleSiriusNext}
+                    className={`p-2 border rounded-xl cursor-pointer active:scale-95 transition-all flex items-center justify-center shrink-0 ${
+                      theme === "light"
+                        ? "text-slate-600 hover:text-slate-900 bg-slate-50 border-slate-200 hover:border-slate-300"
+                        : "text-slate-400 hover:text-white bg-slate-900/40 hover:bg-slate-800/80 border-slate-800/60"
+                    }`}
+                    title="Next Track"
+                  >
+                    <SkipForward className="w-3.5 h-3.5" />
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setIsSiriusLooping(!isSiriusLooping);
+                      addLog(`Custom Deck: Track looping toggled to ${!isSiriusLooping ? "ACTIVE" : "INACTIVE"}`, "info");
+                    }}
+                    className={`p-2 border rounded-xl cursor-pointer active:scale-95 transition-all flex items-center justify-center shrink-0 ${
+                      isSiriusLooping 
+                        ? "text-blue-500 bg-blue-500/10 border-blue-500/30 shadow-md shadow-blue-500/5" 
+                        : (theme === "light"
+                            ? "text-slate-400 bg-slate-50 border-slate-200 hover:text-slate-600"
+                            : "text-slate-400 bg-slate-900/40 border-slate-800/60 hover:text-slate-200")
+                    }`}
+                    title="Toggle Loop Mode"
+                  >
+                    <Repeat className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+
+                {/* MIXER CONTROLS SLIDER ROW */}
+                <div className="space-y-2 select-none">
+                  
+                  {/* Volume level Slider */}
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={handleSiriusMuteToggle}
+                      className={`p-1 border rounded cursor-pointer transition-colors shrink-0 ${
+                        theme === "light" ? "bg-slate-50 border-slate-200" : "bg-slate-900/20 border-slate-800/40"
+                      }`}
+                      title={isSiriusMuted ? "Unmute Audio" : "Mute Audio"}
+                    >
+                      {isSiriusMuted ? (
+                        <VolumeX className="w-3.5 h-3.5 text-rose-500" />
+                      ) : (
+                        <Volume2 className="w-3.5 h-3.5 text-blue-500" />
+                      )}
+                    </button>
+                    <input
+                      type="range"
+                      min={0}
+                      max={1}
+                      step={0.05}
+                      value={isSiriusMuted ? 0 : siriusAudioVolume}
+                      onChange={(e) => {
+                        const v = parseFloat(e.target.value);
+                        setSiriusAudioVolume(v);
+                        if (isSiriusMuted && v > 0) {
+                          setIsSiriusMuted(false);
+                        }
+                      }}
+                      className="flex-1 accent-indigo-500 h-1 bg-slate-200 dark:bg-slate-900 hover:bg-slate-300 dark:hover:bg-slate-800 appearance-none cursor-pointer transition"
+                      title={`Volume: ${Math.round((isSiriusMuted ? 0 : siriusAudioVolume) * 100)}%`}
+                    />
+                    <span className="text-[9px] font-bold font-mono text-slate-500 w-7 text-right">
+                      {Math.round((isSiriusMuted ? 0 : siriusAudioVolume) * 100)}%
+                    </span>
+                  </div>
+
+                  {/* Spectral mode select layout */}
+                  <div className={`flex justify-between items-center p-1 rounded-xl border ${
+                    theme === "light" ? "bg-slate-50 border-slate-200/60" : "bg-slate-900/40 border-slate-900/60"
+                  }`}>
+                    <span className="text-[8px] font-extrabold text-slate-400 uppercase tracking-widest font-mono pl-1.5 select-none">
+                      Visual:
+                    </span>
+                    <div className="flex gap-0.5">
+                      {(["eq", "wave", "fire", "matrix"] as const).map((m) => (
+                        <button
+                          key={m}
+                          onClick={() => {
+                            setSiriusVisualizerMode(m);
+                            addLog(`Custom Deck: Set visualizer style to ${m.toUpperCase()}`, "info");
+                          }}
+                          className={`text-[8px] font-extrabold uppercase px-2 py-0.5 rounded transition-all cursor-pointer ${
+                            siriusVisualizerMode === m
+                              ? "bg-blue-600 text-white font-extrabold shadow-sm"
+                              : (theme === "light"
+                                  ? "text-slate-400 hover:text-slate-800 border border-transparent hover:bg-slate-200/50"
+                                  : "text-slate-500 bg-transparent border border-transparent hover:text-slate-300")
+                          }`}
+                        >
+                          {m}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
               </div>
 
             </motion.div>
