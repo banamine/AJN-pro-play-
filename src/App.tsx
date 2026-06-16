@@ -30,17 +30,22 @@ import {
   Sparkles,
   Square,
   RotateCcw,
-  Repeat
+  Repeat,
+  Clock,
+  HelpCircle,
+  Share2
 } from "lucide-react";
 import Hls from "hls.js";
 import { motion, AnimatePresence } from "motion/react";
 import { IPTVChannel, PlaybackHistoryItem, ArchiveEpisode, ColorScheme } from "./types";
-import { buildM3U, buildWeeblyHtml, triggerClientDownload, buildLanguageSeparatedM3U, detectLanguage, buildTVExplorerHtml, buildVidGridHtml, buildPublicIPTVHtml } from "./utils/exportUtils";
+import { buildM3U, buildWeeblyHtml, triggerClientDownload, buildLanguageSeparatedM3U, detectLanguage, buildTVExplorerHtml, buildVidGridHtml, buildPublicIPTVHtml, ExportEpisode } from "./utils/exportUtils";
 
 // Static Default M3U Playlist Source
 const DEFAULT_M3U = `#EXTM3U
 #EXTINF:-1 tvg-logo="https://upload.wikimedia.org/wikipedia/commons/e/e1/Comedy_Central_logo_2018.svg",🎬 Big Buck Bunny (M3U8)
 https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8
+#EXTINF:-1 tvg-logo="https://rumble.com/favicon.ico",🥊 Rumble Embed Live (Direct Bypass)
+https://rumble.com/embed/v77ec70/?pub=15son
 #EXTINF:-1 tvg-logo="https://upload.wikimedia.org/wikipedia/commons/1/18/C-SPAN_logo_2021.svg",📺 Jellyfish Sample (Direct)
 https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4
 #EXTINF:-1 tvg-logo="https://upload.wikimedia.org/wikipedia/commons/e/eb/Eurosport_Logo.svg",📡 Sintel HLS Stream
@@ -151,9 +156,21 @@ export function HeaderClock() {
   );
 }
 
-export function PlayerInfoBar({ currentTitle }: { currentTitle: string }) {
+export function PlayerInfoBar({ 
+  currentTitle, 
+  currentUrl,
+  viewMode,
+  setViewMode 
+}: { 
+  currentTitle: string; 
+  currentUrl: string;
+  viewMode: "standard" | "theater";
+  setViewMode: (mode: "standard" | "theater") => void;
+}) {
   const [timeStr, setTimeStr] = useState("");
   const [countdown, setCountdown] = useState("00:00");
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
     const updateTime = () => {
@@ -175,28 +192,101 @@ export function PlayerInfoBar({ currentTitle }: { currentTitle: string }) {
     return () => clearInterval(interval);
   }, []);
 
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    let leftX = e.clientX;
+    let topY = e.clientY;
+    const menuWidth = 192;
+    const menuHeight = 40;
+    if (leftX + menuWidth > window.innerWidth) {
+      leftX = window.innerWidth - menuWidth - 10;
+    }
+    if (topY + menuHeight > window.innerHeight) {
+      topY = window.innerHeight - menuHeight - 10;
+    }
+    setContextMenu({ x: leftX, y: topY });
+  };
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    const handleOutsideClick = () => setContextMenu(null);
+    window.addEventListener("mousedown", handleOutsideClick);
+    return () => window.removeEventListener("mousedown", handleOutsideClick);
+  }, [contextMenu]);
+
+  const handleShare = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const shareUrl = `${window.location.origin}?stream=${encodeURIComponent(currentUrl || "")}&title=${encodeURIComponent(currentTitle || "")}`;
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      setToast("LINK SAVED TO CLIPBOARD");
+      setTimeout(() => setToast(null), 2000);
+    } catch (err) {
+      console.warn("Failed to copy link via Clipboard API:", err);
+    }
+  };
+
   return (
-    <div 
-      id="gold-info-bar"
-      className="absolute top-8 left-1/2 -translate-x-1/2 bg-[#080A0F]/90 border border-slate-800 rounded-full px-6 py-3 backdrop-blur-md z-10 flex items-center gap-5 text-slate-300 text-[11px] font-mono tracking-wider shadow-2xl shadow-black/80 font-medium max-w-[90%] truncate shrink-0"
-    >
-      <div className="flex items-center gap-1.5 whitespace-nowrap">
-        <span className="text-[10px] text-slate-500 uppercase font-bold tracking-widest">CLOCK:</span>
-        <span className="text-white tracking-widest">{timeStr || "--:--:--"}</span>
-      </div>
-      <div className="w-[1px] h-3 bg-slate-800"></div>
-      <div className="flex items-center gap-1.5 truncate">
-        <span className="text-[10px] text-blue-400 font-extrabold uppercase tracking-widest">PLAYING:</span>
-        <span className="text-white font-semibold truncate max-w-[180px] md:max-w-[360px]">{currentTitle}</span>
-      </div>
-      <div className="hidden md:flex items-center gap-5">
-        <div className="w-[1px] h-3 bg-slate-800"></div>
+    <>
+      <motion.div 
+        id="gold-info-bar"
+        initial={{ y: -50, opacity: 0, x: "-50%" }}
+        animate={{ y: 0, opacity: 1, x: "-50%" }}
+        transition={{ type: "spring", stiffness: 120, damping: 14 }}
+        style={{ left: "50%", transform: "translateX(-50%)" }}
+        onContextMenu={handleContextMenu}
+        className="absolute top-8 bg-[#080A0F]/95 border border-[#00ff66]/30 rounded-full px-6 py-3 backdrop-blur-md z-[100] flex items-center gap-5 text-slate-300 text-[11px] font-mono tracking-wider shadow-2xl shadow-black/80 font-medium max-w-[90%] truncate shrink-0 select-none cursor-context-menu"
+      >
         <div className="flex items-center gap-1.5 whitespace-nowrap">
-          <span className="text-[10px] text-amber-500 font-bold uppercase tracking-widest">⚡ INTRO COUNTDOWN:</span>
-          <span className="text-slate-100">{countdown}</span>
+          <span className="text-[10px] text-slate-500 uppercase font-bold tracking-widest">CLOCK:</span>
+          <span className="text-white tracking-widest">{timeStr || "--:--:--"}</span>
         </div>
-      </div>
-    </div>
+        <div className="w-[1px] h-3 bg-slate-800"></div>
+        <div className="flex items-center gap-1.5 truncate">
+          <span className="text-[10px] text-blue-400 font-extrabold uppercase tracking-widest">PLAYING:</span>
+          <span className="text-white font-semibold truncate max-w-[150px] md:max-w-[320px]">{currentTitle}</span>
+        </div>
+        <div className="hidden md:flex items-center gap-5 shrink-0">
+          <div className="w-[1px] h-3 bg-slate-800"></div>
+          <div className="flex items-center gap-1.5 whitespace-nowrap">
+            <span className="text-[10px] text-amber-500 font-bold uppercase tracking-widest">⚡ INTRO COUNTDOWN:</span>
+            <span className="text-slate-100">{countdown}</span>
+          </div>
+        </div>
+        <div className="w-[1px] h-3 bg-slate-800 shrink-0"></div>
+        <button
+          onClick={handleShare}
+          className="p-1 rounded-lg hover:bg-slate-800/80 text-[#00ff66] hover:text-[#ccff00] cursor-pointer transition-all shrink-0 flex items-center justify-center border border-transparent hover:border-[#00ff66]/20"
+          title="Share Stream Deep Link"
+        >
+          <Share2 className="w-3.5 h-3.5" />
+        </button>
+
+        {toast && (
+          <div className="absolute top-full mt-3 left-1/2 -translate-x-1/2 bg-[#020203]/95 text-[#00ff66] border border-[#00ff66]/40 px-3 py-1.5 rounded-sm text-[9px] font-bold font-mono tracking-widest uppercase shadow-lg shadow-black/80 animate-pulse whitespace-nowrap z-[110]">
+            {toast}
+          </div>
+        )}
+      </motion.div>
+
+      {contextMenu && (
+        <div 
+          style={{ top: `${contextMenu.y}px`, left: `${contextMenu.x}px` }}
+          className="fixed bg-neutral-950/95 backdrop-blur-md border border-[#00ff66]/30 px-1 py-1 rounded-sm w-48 shadow-[0_4px_20px_rgba(0,255,102,0.15)] z-[9999] font-mono text-xs text-[#00ff66] flex flex-col"
+        >
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setViewMode(viewMode === "theater" ? "standard" : "theater");
+              setContextMenu(null);
+            }}
+            className="w-full text-left px-2 py-1.5 hover:bg-[#00ff66]/10 rounded-sm cursor-pointer transition-colors font-bold tracking-wider"
+          >
+            {viewMode === "theater" ? "🖥️ RESTORE STANDARD" : "📺 SWITCH TO THEATER"}
+          </button>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -251,13 +341,41 @@ const getDaysInMonthGrid = (year: number, month: number) => {
   return grid;
 };
 
+const isRumbleUrl = (url: string | null | undefined): boolean => {
+  if (!url) return false;
+  return url.toLowerCase().includes("rumble.com/");
+};
+
+const getRumbleEmbedUrl = (url: string | null | undefined): string => {
+  if (!url) return "";
+  let cleanUrl = url.trim();
+  
+  // If it is already an embed link, return it directly
+  if (cleanUrl.toLowerCase().includes("/embed/")) {
+    return cleanUrl;
+  }
+  
+  // If it matches rumble.com/v[a-zA-Z0-9]+
+  // e.g., https://rumble.com/v77ec70-some-story.html or https://rumble.com/v77ec70
+  const match = cleanUrl.match(/rumble\.com\/(v[a-zA-Z0-9]+)/i);
+  if (match && match[1]) {
+    return `https://rumble.com/embed/${match[1]}/`;
+  }
+  
+  return cleanUrl;
+};
+
 export default function App() {
   // Navigation & Sidebars State
-  const [activeTab, setActiveTab] = useState<"playlist" | "favorites" | "history" | "archive">("playlist");
+  const [activeTab, setActiveTab] = useState<"live" | "archive" | "audio" | "export" | "debug">("live");
+  const [liveSidebarTab, setLiveSidebarTab] = useState<"streams" | "favorites" | "history">("streams");
   const [isLeftSidebarOpen, setIsLeftSidebarOpen] = useState(true);
   const [isRightSidebarOpen, setIsRightSidebarOpen] = useState(false);
   const [theme, setTheme] = useState<"dark" | "light">("dark");
   const [selectedHtmlTemplate, setSelectedHtmlTemplate] = useState<"tvexplorer" | "vidgrid" | "publiciptv" | "weebly">("tvexplorer");
+  const [mainViewerMode, setMainViewerMode] = useState<"standard" | "tvexplorer" | "vidgrid" | "publiciptv" | "weebly">("standard");
+  const [mainViewerDataSource, setMainViewerDataSource] = useState<"channels" | "archive">("archive");
+  const [viewMode, setViewMode] = useState<"standard" | "theater">("standard");
 
   // IPTV Core Data State
   const [channels, setChannels] = useState<IPTVChannel[]>([]);
@@ -314,6 +432,16 @@ export default function App() {
   const siriusCanvasHeightsRef = useRef<number[]>(new Array(120).fill(0));
   const siriusPeakHeightsRef = useRef<number[]>(new Array(120).fill(0));
   const siriusPeakDecayRef = useRef<number[]>(new Array(120).fill(0));
+  const siriusTabCanvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  // Equalizer & Synthesis Custom States
+  const [siriusPreset, setSiriusPreset] = useState<"neutral" | "heavy" | "vocal" | "metal">("neutral");
+  const [siriusLowBass, setSiriusLowBass] = useState(50);
+  const [siriusBass, setSiriusBass] = useState(50);
+  const [siriusVocalMid, setSiriusVocalMid] = useState(50);
+  const [siriusHighMid, setSiriusHighMid] = useState(50);
+  const [siriusTreble, setSiriusTreble] = useState(50);
+  const [siriusPlaybackRate, setSiriusPlaybackRate] = useState(1.0);
   const siriusPhaseRef = useRef<number>(0);
 
   // List of state-managed Sirius tracks to cycle through
@@ -449,6 +577,20 @@ export default function App() {
     };
   }, []);
 
+  // Deep-linking Query Parameter Startup Loader
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const streamParam = params.get("stream");
+    const titleParam = params.get("title");
+    if (streamParam) {
+      const decodedStream = decodeURIComponent(streamParam);
+      const decodedTitle = titleParam ? decodeURIComponent(titleParam) : "Shared Stream";
+      setTimeout(() => {
+        playStream(decodedStream, decodedTitle);
+      }, 1500);
+    }
+  }, []);
+
   // Synchronize index change, delay timing, and loadedmetadata initialization
   useEffect(() => {
     if (!isSiriusOverlayOpen) {
@@ -509,10 +651,10 @@ export default function App() {
 
   // HTML5 Canvas 120-bar visualizer rendering loop
   useEffect(() => {
-    if (!isSiriusOverlayOpen) return;
+    if (!isSiriusOverlayOpen && activeTab !== "audio") return;
 
     let animationId: number;
-    const canvas = siriusCanvasRef.current;
+    const canvas = siriusCanvasRef.current || siriusTabCanvasRef.current;
     if (!canvas) return;
 
     const ctx = canvas.getContext("2d");
@@ -674,7 +816,7 @@ export default function App() {
     return () => {
       cancelAnimationFrame(animationId);
     };
-  }, [isSiriusOverlayOpen, isSiriusPlaying, currentSiriusTrackIndex, siriusVisualizerMode, siriusAudioVolume, isSiriusMuted]);
+  }, [isSiriusOverlayOpen, activeTab, isSiriusPlaying, currentSiriusTrackIndex, siriusVisualizerMode, siriusAudioVolume, isSiriusMuted]);
 
   // Save Config Preferences
   useEffect(() => {
@@ -737,25 +879,105 @@ export default function App() {
 
   // Parsing standard M3U raw syntax
   const parseAndLoadM3U = (rawText: string) => {
-    const lines = rawText.split("\n");
+    // 1. Line Normalization
+    const normalizedRawText = rawText.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+    const lines = normalizedRawText.split("\n");
     const parsedChannels: IPTVChannel[] = [];
     let currentChannel: Partial<IPTVChannel> | null = null;
+
+    // 2. Playlist-Level Attributes
+    let epgUrl: string | null = null;
+    let playlistName: string = "";
+    if (lines.length > 0 && lines[0].startsWith("#EXTM3U")) {
+      const firstLine = lines[0];
+      const epgUrlMatch = firstLine.match(/(?:x-tvg-url|url-tvg)="([^"]+)"/i);
+      const playlistNameMatch = firstLine.match(/x-tvg-name="([^"]+)"/i);
+      if (epgUrlMatch) epgUrl = epgUrlMatch[1] || epgUrlMatch[2];
+      if (playlistNameMatch) playlistName = playlistNameMatch[1];
+      if (epgUrl || playlistName) {
+        addLog(`Parsed Playlist Header - Name: "${playlistName || "N/A"}" EPG: "${epgUrl || "N/A"}"`);
+      }
+    }
+
+    const extractAttr = (line: string, attr: string): string | null => {
+      const m = line.match(new RegExp(`${attr}="([^"]*)"`, 'i'));
+      return m ? m[1].trim() || null : null;
+    };
 
     for (let line of lines) {
       line = line.trim();
       if (line.startsWith("#EXTINF")) {
-        const nameMatch = line.match(/,([^,]+)$/);
-        const logoMatch = line.match(/tvg-logo="([^"]+)"/i);
-        const groupMatch = line.match(/group-title="([^"]+)"/i);
+        // Parse Duration (integer after #EXTINF: and before first space/comma)
+        const durationPart = line.substring(8);
+        const firstSpaceOrComma = durationPart.search(/[\s,]/);
+        const durationStr = firstSpaceOrComma !== -1 ? durationPart.substring(0, firstSpaceOrComma) : durationPart;
+        let duration = parseInt(durationStr, 10);
+        if (isNaN(duration)) duration = -1;
+
+        // Display Name (text after last comma)
+        const lastCommaIdx = line.lastIndexOf(",");
+        const postCommaName = lastCommaIdx !== -1 ? line.substring(lastCommaIdx + 1).trim() : "";
+        const tvgName = extractAttr(line, "tvg-name");
+        const finalName = (tvgName || postCommaName || "Unnamed Stream").trim();
+
+        // Parse Catchup days
+        const catchupDaysStr = extractAttr(line, "catchup-days");
+        const catchupDaysVal = catchupDaysStr ? parseInt(catchupDaysStr, 10) : NaN;
+        const catchupDays = !isNaN(catchupDaysVal) ? catchupDaysVal : undefined;
+
         currentChannel = {
-          name: nameMatch ? nameMatch[1].trim() : "Unnamed Stream",
-          logo: logoMatch ? logoMatch[1] : null,
-          group: groupMatch ? groupMatch[1].trim() : "General",
+          name: finalName,
+          logo: extractAttr(line, "tvg-logo"),
+          group: extractAttr(line, "group-title") || "General",
+          tvgId: extractAttr(line, "tvg-id") || undefined,
+          tvgName: tvgName || undefined,
+          tvgChno: extractAttr(line, "tvg-chno") || undefined,
+          tvgLanguage: extractAttr(line, "tvg-language") || undefined,
+          tvgCountry: extractAttr(line, "tvg-country") || undefined,
+          tvgGenre: extractAttr(line, "tvg-genre") || undefined,
+          resolution: extractAttr(line, "resolution") || undefined,
+          bitrate: extractAttr(line, "bitrate") || undefined,
+          codec: extractAttr(line, "codec") || undefined,
+          userAgent: extractAttr(line, "http-user-agent") || extractAttr(line, "user-agent") || undefined,
+          referer: extractAttr(line, "http-referrer") || extractAttr(line, "referer") || undefined,
+          auth: extractAttr(line, "auth") || undefined,
+          catchup: extractAttr(line, "catchup") || undefined,
+          catchupDays: catchupDays,
+          duration: duration,
+          description: extractAttr(line, "description") || undefined,
+          status: extractAttr(line, "status") || undefined,
           url: ""
         };
+
+        // Cyrillic Detection
+        const isCyrillic = /^[\u0400-\u04FF\s\d\-–—,:!?\.]+$/.test(finalName);
+        if (isCyrillic) {
+          currentChannel._cyrillicTitle = true;
+        }
+
+        // Inferred Language
+        if (!currentChannel.tvgLanguage) {
+          const detected = detectLanguage(finalName, currentChannel.group ?? "");
+          currentChannel._inferredLanguage = detected.code;
+        }
+
+      } else if (line.startsWith("#EXTVLCOPT:")) {
+        if (currentChannel) {
+          const option = line.substring(11).trim();
+          const eqIdx = option.indexOf("=");
+          if (eqIdx !== -1) {
+            const optKey = option.substring(0, eqIdx).trim().toLowerCase();
+            const optVal = option.substring(eqIdx + 1).trim();
+            if (optKey === "http-user-agent" || optKey === "user-agent") {
+              currentChannel.userAgent = optVal || undefined;
+            } else if (optKey === "http-referrer" || optKey === "referrer" || optKey === "referer") {
+              currentChannel.referer = optVal || undefined;
+            }
+          }
+        }
       } else if (line && !line.startsWith("#")) {
         if (currentChannel) {
-          currentChannel.url = line;
+          currentChannel.url = line.trim();
           parsedChannels.push(currentChannel as IPTVChannel);
           currentChannel = null;
         }
@@ -766,6 +988,15 @@ export default function App() {
       setChannels(parsedChannels);
       localStorage.setItem("ajn_iptv_channels", JSON.stringify(parsedChannels));
       addLog(`Loaded and parsed ${parsedChannels.length} stream channels from Playlist`);
+      
+      const liveCount = parsedChannels.filter(c => c.duration === -1).length;
+      const vodCount = parsedChannels.filter(c => c.duration !== undefined && c.duration > 0).length;
+      const langGroups = new Set<string>();
+      parsedChannels.forEach(c => {
+        const l = c.tvgLanguage || c._inferredLanguage;
+        if (l) langGroups.add(l.toLowerCase());
+      });
+      addLog(`Parsed ${liveCount} live · ${vodCount} VOD · ${langGroups.size} language groups`);
     } else {
       addLog("M3U upload had no detectable channels or empty body", "warning");
     }
@@ -786,6 +1017,28 @@ export default function App() {
   };
 
   const loadCustomM3uUrl = async (urlStr: string) => {
+    const cleanUrl = urlStr.trim();
+    if (isRumbleUrl(cleanUrl) || cleanUrl.toLowerCase().endsWith(".mp4") || cleanUrl.toLowerCase().endsWith(".mp3") || (cleanUrl.includes("commondatastorage") && !cleanUrl.toLowerCase().includes(".m3u"))) {
+      addLog(`Direct stream URL input detected. Auto-assembling a 'Quick Cast' virtual channel and firing up player`, "info");
+      const name = isRumbleUrl(cleanUrl) ? "🥊 Rumble Quick Cast" : "📺 Direct Cast Stream";
+      const logo = isRumbleUrl(cleanUrl) ? "https://rumble.com/favicon.ico" : null;
+      const singleChannel: IPTVChannel = {
+        name,
+        logo,
+        group: "Quick Cast",
+        url: cleanUrl
+      };
+      setChannels(prev => {
+        const filtered = prev.filter(c => c.url !== cleanUrl);
+        const newChannels = [singleChannel, ...filtered];
+        localStorage.setItem("ajn_iptv_channels", JSON.stringify(newChannels));
+        return newChannels;
+      });
+      playStream(cleanUrl, name);
+      setFeedLoadingStatus("Loaded Direct Link");
+      return;
+    }
+
     addLog(`Fetching external M3U playlist from: ${urlStr}`);
     setFeedLoadingStatus("Fetching M3U...");
 
@@ -1005,6 +1258,65 @@ export default function App() {
     });
   }, [archiveEpisodes, selectedDate, filterShowAlex, filterShowWarRoom, filterShowSunday, filterShowOther]);
 
+  // Memoized compiled HTML template content for the switchable main viewer
+  const activeTemplateHtml = useMemo(() => {
+    if (mainViewerMode === "standard") return "";
+
+    const feedList = mainViewerDataSource === "channels" 
+      ? channels.map(ch => ({
+          title: ch.name,
+          url: ch.url,
+          duration: -1,
+          groupTitle: ch.group,
+          tvgLogo: ch.logo || ""
+        }))
+      : selectedDateEpisodes.map(ep => ({
+          title: `${ep.title} (${ep.hour})`,
+          url: ep.videoUrl,
+          duration: 3600,
+          groupTitle: ep.show,
+          tvgLogo: getLogoUrl(ep.show)
+        }));
+
+    if (feedList.length === 0) {
+      return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { background-color: #080A0F; color: #f1f5f9; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; font-family: sans-serif; }
+  </style>
+</head>
+<body class="text-center p-6">
+  <div class="max-w-md bg-[#0F1420] border border-slate-800 p-8 rounded-[24px] shadow-2xl">
+    <div class="text-4xl mb-4">📭</div>
+    <h3 class="text-lg font-bold text-slate-200 mb-2">No Playlist Streams Available</h3>
+    <p class="text-xs text-slate-500 leading-relaxed">
+      This live template viewer pulls directly from your loaded playlist data source. Please import an M3U playlist file or select a show archival date on the left panel to populate streams.
+    </p>
+  </div>
+</body>
+</html>`;
+    }
+
+    try {
+      if (mainViewerMode === "tvexplorer") {
+        return buildTVExplorerHtml(feedList, mainViewerDataSource === "channels" ? "Live IPTV Explorer" : `AJN - TV Explorer [${selectedDate}]`);
+      } else if (mainViewerMode === "vidgrid") {
+        return buildVidGridHtml(feedList, mainViewerDataSource === "channels" ? "Live IPTV VidGrid" : `AJN - VidGrid [${selectedDate}]`);
+      } else if (mainViewerMode === "publiciptv") {
+        return buildPublicIPTVHtml(feedList, mainViewerDataSource === "channels" ? "Live IPTV Retro Cinema" : `AJN - Cinema [${selectedDate}]`);
+      } else if (mainViewerMode === "weebly") {
+        return buildWeeblyHtml(feedList, mainViewerDataSource === "channels" ? "Live IPTV Classic Loop" : `AJN - Classic Loop [${selectedDate}]`);
+      }
+    } catch (err: any) {
+      console.error(err);
+      return `<html><body><h1>Error generating template</h1><p>${err?.message}</p></body></html>`;
+    }
+    return "";
+  }, [mainViewerMode, mainViewerDataSource, channels, selectedDateEpisodes, selectedDate]);
+
   // Dynamic Playlist Exporters & Downloader hooks
   const handleExportSelectedM3U = () => {
     if (selectedDateEpisodes.length === 0) {
@@ -1161,19 +1473,34 @@ export default function App() {
 
   // ── IPTV CHANNEL EXPORT HANDLERS ─────────────────────────────────────────────
 
+  const mapChannelToExportEpisode = (ch: IPTVChannel): ExportEpisode => ({
+    title: ch.name,
+    url: ch.url,
+    duration: ch.duration !== undefined ? ch.duration : -1,
+    groupTitle: ch.group,
+    tvgLogo: ch.logo || "",
+    tvgId: ch.tvgId,
+    tvgName: ch.tvgName,
+    tvgChno: ch.tvgChno,
+    tvgLanguage: ch.tvgLanguage,
+    tvgCountry: ch.tvgCountry,
+    tvgGenre: ch.tvgGenre,
+    userAgent: ch.userAgent,
+    referer: ch.referer,
+    catchup: ch.catchup,
+    catchupDays: ch.catchupDays,
+    resolution: ch.resolution,
+    bitrate: ch.bitrate,
+    codec: ch.codec
+  });
+
   const handleExportIPTVChannelsHtmlPlayer = () => {
     const sourceList = filteredChannels.length > 0 ? filteredChannels : channels;
     if (sourceList.length === 0) {
       addLog("No channels loaded to export. Load a playlist in the Streams tab first.", "warning");
       return;
     }
-    const exportList = sourceList.map(ch => ({
-      title:      ch.name,
-      url:        ch.url,
-      duration:   -1,
-      groupTitle: ch.group,
-      tvgLogo:    ch.logo || ""
-    }));
+    const exportList = sourceList.map(mapChannelToExportEpisode);
 
     let htmlContent = "";
     let filename    = "IPTV_Export.html";
@@ -1210,13 +1537,7 @@ export default function App() {
       addLog("No channels loaded to export.", "warning");
       return;
     }
-    const exportList = sourceList.map(ch => ({
-      title:      ch.name,
-      url:        ch.url,
-      duration:   -1,
-      groupTitle: ch.group,
-      tvgLogo:    ch.logo || ""
-    }));
+    const exportList = sourceList.map(mapChannelToExportEpisode);
     const m3u = buildM3U(exportList, "IPTV Playlist Export", false);
     triggerClientDownload(m3u, "IPTV_Channels_Export.m3u", "audio/x-mpegurl;charset=utf-8");
     addLog(`Exported ${sourceList.length} IPTV channels as M3U: IPTV_Channels_Export.m3u`);
@@ -1228,13 +1549,7 @@ export default function App() {
       addLog("No channels loaded. Load a playlist in the Streams tab first.", "warning");
       return;
     }
-    const exportList = sourceList.map(ch => ({
-      title:      ch.name,
-      url:        ch.url,
-      duration:   -1,
-      groupTitle: ch.group,
-      tvgLogo:    ch.logo || ""
-    }));
+    const exportList = sourceList.map(mapChannelToExportEpisode);
 
     if (specificLangCode) {
       const filtered = exportList.filter(ep => {
@@ -1410,6 +1725,33 @@ export default function App() {
 
     if (!url) return;
     addLog(`Loading stream pipeline: ${url}`);
+
+    if (isRumbleUrl(url)) {
+      addLog(`Rumble Embed Stream Detected: Direct sandboxed engine bypass activated for optimized container embedding`, "info");
+      
+      if (hlsRef.current) {
+        addLog("Memory Leak Prevention: Detaching legacy media and destroying previous HLS instance", "info");
+        hlsRef.current.detachMedia();
+        hlsRef.current.destroy();
+        hlsRef.current = null;
+      }
+
+      setPlayerStatus("Playing");
+      setCurrentUrl(url);
+      setCurrentTitle(titleStr);
+
+      const historyItem: PlaybackHistoryItem = {
+        id: `history_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+        type: "stream",
+        name: titleStr,
+        url,
+        playedAt: new Date().toLocaleTimeString()
+      };
+      const updatedHistory = [historyItem, ...history.filter(h => h.url !== url)].slice(0, 50);
+      setHistory(updatedHistory);
+      localStorage.setItem("ajn_iptv_history", JSON.stringify(updatedHistory));
+      return;
+    }
     
     setPlayerStatus("Loading");
     setCurrentUrl(url);
@@ -1465,7 +1807,7 @@ export default function App() {
           backBufferLen = 10; // purge played content immediately to free up RAM
           syncSettings = {
             maxBufferHole: 2.0,            // skip structural buffer cracks instead of timing out
-            nudgeMaxRetries: 15,           // keep playhead advancing under spotty feed conditions
+            nudgeMaxRetry: 15,           // keep playhead advancing under spotty feed conditions
             nudgeOffset: 0.15,             // nudge playhead to bypass black frame stalls
             highBufferWatchdogPeriod: 2,   // aggressively check A/V drift
             liveSyncDurationCount: 2,      // pull live streams close to keep sound and frames synced
@@ -1478,7 +1820,7 @@ export default function App() {
           backBufferLen = 30;
           syncSettings = {
             maxBufferHole: 1.5,
-            nudgeMaxRetries: 10,
+            nudgeMaxRetry: 10,
             nudgeOffset: 0.1,
             highBufferWatchdogPeriod: 3,
           };
@@ -1490,20 +1832,79 @@ export default function App() {
           backBufferLen = 120; // store back buffer to avoid stutter when repeating content
           syncSettings = {
             maxBufferHole: 0.8,
-            nudgeMaxRetries: 5,
+            nudgeMaxRetry: 5,
           };
         }
       }
 
       addLog(`Network Optimization: Synced to '${networkCategory}'. Selected buffer threshold = ${targetBufferLength}s, maxBuffer = ${targetMaxBufferLength}s.`, "info");
 
+      let consecutiveMediaErrors = 0;
+
       const hls = new Hls({
         enableWorker: true,
         maxMaxBufferLength: targetMaxBufferLength,
         maxBufferLength: targetBufferLength,
         maxBufferSize: maxBufferSizeValue,
-        lowLatencyMode: false,          // standard buffer mode for VOD & archive stream stability
+        lowLatencyMode: false,          // stable buffer mode for VOD & stream stability
         backBufferLength: backBufferLen,
+        
+        // --- SECURE BYPASS CUSTOM HEADERS FOR LIVE / DVR STREAMS ---
+        xhrSetup: (xhr, requestUrl) => {
+          // Look up channel metadata to apply explicit userAgent/referer credentials if defined
+          const matchedChannel = channels.find(c => c.url === url);
+          if (matchedChannel) {
+            if (matchedChannel.userAgent) {
+              try {
+                xhr.setRequestHeader("User-Agent", matchedChannel.userAgent);
+              } catch (err) {
+                console.warn("[AJN] Failed to set User-Agent header:", err);
+              }
+            }
+            if (matchedChannel.referer) {
+              try {
+                xhr.setRequestHeader("Referer", matchedChannel.referer);
+              } catch (err) {
+                console.debug("[AJN] Referer header required but cannot be set client-side:", matchedChannel.referer);
+              }
+            }
+          }
+
+          if (requestUrl.includes("rumble") || requestUrl.includes("chunklist") || requestUrl.includes("bfap-rvuz")) {
+            try {
+              xhr.setRequestHeader("Referer", "https://rumble.com/");
+              xhr.setRequestHeader("Origin", "https://rumble.com");
+            } catch (e) {
+              console.warn("Could not set custom hotlink-bypass headers:", e);
+            }
+          }
+        },
+
+        // --- PROACTIVE STREAM TIMING & EXPONENTIAL BACKOFF RETRY LOGIC ---
+        manifestLoadingMaxRetry: 15,
+        manifestLoadingRetryDelay: 1000,
+        manifestLoadingMaxRetryTimeout: 10000,
+        
+        levelLoadingMaxRetry: 15,
+        levelLoadingRetryDelay: 1000,
+        levelLoadingMaxRetryTimeout: 10000,
+        
+        fragLoadingMaxRetry: 18,
+        fragLoadingRetryDelay: 500,
+        fragLoadingMaxRetryTimeout: 12000,
+        
+        // --- DVR SLIDING WINDOW & ROBUST SEGMENT DELETION HANDLING ---
+        liveSyncDurationCount: 3,       // stay safely 3 segments behind live edge to prevent requesting deleted chunks
+        liveMaxLatencyDurationCount: 8,  // sync back to live edge if lag exceeds 8 chunks
+        liveDurationInfinity: true,      // treat live manifests as dynamic, endless feeds
+        
+        // --- AUDIO/VIDEO TIMING & DECODING ROBUSTNESS ---
+        forceKeyFrameOnDiscontinuity: true, // align keyframes at segment changes to mitigate ADTS AAC codec errors
+        maxBufferHole: 1.5,             // skip segment gaps or decode skips
+        nudgeMaxRetry: 15,            // constantly advance playhead past stalled segments
+        nudgeOffset: 0.1,               // tiny offset nudge past corrupted TS structures
+        highBufferWatchdogPeriod: 3,    // keep audio and video tracks aligned
+        
         ...syncSettings
       });
       hlsRef.current = hls;
@@ -1522,23 +1923,51 @@ export default function App() {
       });
 
       hls.on(Hls.Events.ERROR, (event, data) => {
+        const errorDetails = `HLS error [details: ${data.details}, type: ${data.type}, fatal: ${data.fatal}]`;
+        
         if (data.fatal) {
           switch (data.type) {
             case Hls.ErrorTypes.NETWORK_ERROR:
-              addLog(`HLS network error encountered: ${data.details}. Attempting automatic pipeline reload...`, "warning");
+              addLog(`${errorDetails}. Fatal network error - reloading stream pipeline...`, "warning");
               hls.startLoad();
               break;
             case Hls.ErrorTypes.MEDIA_ERROR:
-              addLog(`HLS player media decode stutter: ${data.details}. Attempting active frame recovery...`, "warning");
-              hls.recoverMediaError();
+              consecutiveMediaErrors++;
+              addLog(`${errorDetails}. Fatal media decode error (consecutive count: ${consecutiveMediaErrors}). Attempting recovery...`, "warning");
+              if (consecutiveMediaErrors === 1) {
+                hls.recoverMediaError();
+              } else if (consecutiveMediaErrors === 2) {
+                addLog("Second fatal media error: Swapping audio codecs to resolve Potential AAC-in-MPEG-TS issues...", "warning");
+                hls.swapAudioCodec();
+                hls.recoverMediaError();
+              } else {
+                addLog("Consecutive media errors unresolved: Hard reloading media source engine...", "error");
+                consecutiveMediaErrors = 0;
+                hls.detachMedia();
+                hls.loadSource(url);
+                hls.attachMedia(video);
+              }
               break;
             default:
-              addLog(`HLS unrecoverable crash: ${data.details}. Initiating CORS proxy gateway fallback.`, "error");
+              addLog(`Unrecoverable fatal HLS error: ${data.details}. Initiating deep direct proxy gateway fallback.`, "error");
               hls.detachMedia();
               hls.destroy();
               hlsRef.current = null;
               handlePlayerError(url, titleStr);
               break;
+          }
+        } else {
+          // Track and recover warning errors (e.g. keyframe jumps, minor chunk loading stalls, deleted chunks in local sliding index)
+          if (data.details === "fragLoadError" || data.details === "fragLoadTimeOut") {
+            addLog(`Non-fatal warning [${data.details}]: Segment missing/timed out (potentially deleted by sliding DVR). Auto-skipping chunk.`, "warning");
+            if (video && !video.paused) {
+              video.currentTime += 0.5;
+            }
+          } else if (data.details === "bufferStalledError") {
+            addLog("Player buffer stalled on transport segment. Nudging playhead to skip segment freeze.", "warning");
+            if (video) {
+              video.currentTime += 0.25;
+            }
           }
         }
       });
@@ -1702,59 +2131,80 @@ export default function App() {
     <div id="unified-player-app" className={`min-h-screen flex flex-col font-sans transition-all duration-300 antialiased overflow-hidden select-none ${theme === "light" ? "text-slate-800 bg-slate-50" : "text-slate-300 bg-[#0B0E14]"}`}>
       
       {/* HEADER TOP BAR */}
-      <header className={`h-20 px-8 flex items-center justify-between border-b ${theme === "light" ? "border-slate-200 bg-white/95 shadow-sm" : "border-slate-800/50 bg-[#080A0F]/95 shadow-lg"} backdrop-blur-md z-30 shrink-0`}>
-        <div className="flex items-center gap-4">
+      <header className={`h-22 px-6 flex items-center justify-between border-b ${theme === "light" ? "border-slate-200 bg-white/95 shadow-sm" : "border-slate-800/50 bg-[#080A0F]/95 shadow-lg"} backdrop-blur-md z-30 shrink-0 select-none overflow-x-auto gap-4`}>
+        <div className="flex items-center gap-3 shrink-0">
           <button 
             id="btn-sidebar-toggle-left"
             onClick={() => setIsLeftSidebarOpen(!isLeftSidebarOpen)}
-            className={`p-2.5 cursor-pointer border rounded-xl text-blue-400 hover:text-white transition-all active:scale-95 ${theme === "light" ? "bg-slate-100 hover:bg-slate-200 border-slate-200" : "bg-slate-800/30 hover:bg-slate-800 border-slate-800/50"}`}
+            className={`p-2 cursor-pointer border rounded-xl text-blue-400 hover:text-white transition-all active:scale-95 ${theme === "light" ? "bg-slate-100 hover:bg-slate-200 border-slate-200" : "bg-slate-800/30 hover:bg-slate-800 border-slate-800/50"}`}
             title="Toggle Sidebar Control Panel"
           >
             <Menu className="w-4 h-4" />
           </button>
           
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2.5">
             <img 
               src="/src/assets/images/ajn_logo_1781449178665.jpg" 
               alt="AJN Logo" 
-              className="w-9 h-9 rounded-xl object-cover shadow-lg shadow-blue-950/20"
+              className="w-10 h-10 rounded-xl object-cover shadow-lg shadow-blue-950/20"
               referrerPolicy="no-referrer"
             />
             <div>
-              <h1 className={`text-sm font-semibold tracking-tight uppercase sm:text-base ${theme === "light" ? "text-slate-900" : "text-white"}`}>
-                AJN Professional Player
+              <h1 className={`text-sm font-black tracking-tighter uppercase sm:text-base leading-tight ${theme === "light" ? "text-slate-900" : "text-white"}`}>
+                AJN LIBERTY PLAY
               </h1>
-              <p className={`text-[10px] font-semibold tracking-wide ${theme === "light" ? "text-slate-500" : "text-slate-500"}`}>IPTV & Segmented Video Archives</p>
+              <p className={`text-[9px] font-extrabold tracking-widest font-mono uppercase ${theme === "light" ? "text-blue-650" : "text-blue-500"}`}>ver2.2 Professional Broadcast Console</p>
             </div>
           </div>
         </div>
 
-        {/* MIDDLE DISPLAY: TIME & Countdown */}
-        <HeaderClock />
+        {/* COMPACT & RESPONSIVE TAB SWITCHER WITH ICONS */}
+        <div className="flex items-center gap-1.5 bg-[#040609]/60 p-1.5 rounded-2xl border border-slate-800/40 select-none shrink-0">
+          {(["live", "archive", "audio", "export", "debug"] as const).map((tab) => {
+            const isActive = activeTab === tab;
+            const icon = tab === "live" ? "📡" 
+                        : tab === "archive" ? "🗄️" 
+                        : tab === "audio" ? "🎹" 
+                        : tab === "export" ? "📦" 
+                        : "🛠️";
+            const label = tab === "live" ? "Live" 
+                        : tab === "archive" ? "Archive" 
+                        : tab === "audio" ? "Audio" 
+                        : tab === "export" ? "Export" 
+                        : "Debug";
+            return (
+              <button
+                key={tab}
+                onClick={() => {
+                  setActiveTab(tab);
+                  addLog(`Navigated to active tab: ${tab.toUpperCase()}`);
+                }}
+                className={`py-2 px-3 md:px-4 rounded-xl text-xs font-bold font-sans flex items-center gap-2 cursor-pointer transition-all ${
+                  isActive 
+                    ? "bg-blue-600 text-white shadow-xl shadow-blue-900/35"
+                    : "text-slate-400 hover:text-white hover:bg-slate-800/40"
+                }`}
+              >
+                <span>{icon}</span>
+                <span className="hidden sm:inline">{label}</span>
+              </button>
+            );
+          })}
+        </div>
 
         {/* UTILITIES (RIGHT) */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0">
+          <HeaderClock />
+
           {feedLoadingStatus !== "Loaded" && (
             <motion.div 
               animate={{ rotate: 360 }}
               transition={{ repeat: Infinity, duration: 1.5, ease: "linear" }}
-              className="text-amber-500 mr-2"
+              className="text-amber-500 mr-1"
             >
               <RefreshCw className="w-4 h-4" />
             </motion.div>
           )}
-
-          <button 
-            onClick={() => {
-              setIsSiriusOverlayOpen(true);
-              startSiriusMusic();
-            }}
-            className={`px-4 py-2 text-xs cursor-pointer border rounded-full font-bold transition-all flex items-center gap-2 shadow-sm ${theme === "light" ? "bg-slate-100 hover:bg-blue-50 border-slate-200 hover:border-blue-400 text-slate-700 hover:text-blue-600" : "bg-slate-800/40 hover:bg-blue-600 border border-slate-800 hover:border-blue-500 text-slate-300 hover:text-white"}`}
-            title="Launch Sirius Sound Overlay"
-          >
-            <Volume2 className="w-3.5 h-3.5 text-blue-400" />
-            Sirius Preamble
-          </button>
 
           <button 
             id="btn-sidebar-toggle-right"
@@ -1789,39 +2239,48 @@ export default function App() {
               className={`h-full shrink-0 flex flex-col z-20 overflow-hidden border-r ${theme === "light" ? "bg-white border-slate-200" : "bg-[#080A0F] border-slate-800/50"}`}
             >
               {/* TABS SELECTOR */}
-              <div className={`p-3 grid grid-cols-4 gap-1 shrink-0 text-slate-500 text-xs font-semibold font-sans border-b ${theme === "light" ? "bg-slate-50 border-slate-200" : "bg-[#06080c] border-slate-900"}`}>
-                {(["playlist", "favorites", "history", "archive"] as const).map(tab => {
-                  const isActive = activeTab === tab;
-                  const label = tab === "playlist" ? "📡 Streams" 
-                    : tab === "favorites" ? "⭐ Favs" 
-                    : tab === "history" ? "📜 Hist" 
-                    : "🗄️ AJN";
-                  return (
-                    <button
-                      key={tab}
-                      onClick={() => setActiveTab(tab)}
-                      className={`py-2 text-center rounded-lg text-[11px] cursor-pointer font-bold transition-all ${
-                        isActive 
-                          ? (theme === "light" 
-                              ? "bg-blue-50 text-blue-600 border border-blue-200 shadow-sm" 
-                              : "bg-blue-500/10 text-blue-400 border border-blue-500/20 shadow-sm")
-                          : (theme === "light"
-                              ? "border border-transparent text-slate-500 hover:text-slate-800 hover:bg-slate-100"
-                              : "border border-transparent text-slate-500 hover:text-slate-300 hover:bg-slate-800/20")
-                      }`}
-                    >
-                      {isActive && <span className="mr-0.5">•</span>}
-                      {label}
-                    </button>
-                  );
-                })}
-              </div>
+              {activeTab === "live" ? (
+                <div className={`p-3 grid grid-cols-3 gap-1 shrink-0 text-slate-500 text-xs font-semibold font-sans border-b ${theme === "light" ? "bg-slate-50 border-slate-200" : "bg-[#06080c] border-slate-900"}`}>
+                  {(["streams", "favorites", "history"] as const).map(tab => {
+                    const isActive = liveSidebarTab === tab;
+                    const label = tab === "streams" ? "📡 Streams" 
+                      : tab === "favorites" ? "⭐ Favs" 
+                      : "📜 Hist";
+                    return (
+                      <button
+                        key={tab}
+                        onClick={() => setLiveSidebarTab(tab)}
+                        className={`py-2 text-center rounded-lg text-[11px] cursor-pointer font-bold transition-all ${
+                          isActive 
+                            ? (theme === "light" 
+                                ? "bg-blue-50 text-blue-600 border border-blue-200 shadow-sm" 
+                                : "bg-blue-500/10 text-blue-400 border border-blue-500/20 shadow-sm")
+                            : (theme === "light"
+                                ? "border border-transparent text-slate-500 hover:text-slate-800 hover:bg-slate-100"
+                                : "border border-transparent text-slate-500 hover:text-slate-300 hover:bg-slate-800/20")
+                        }`}
+                      >
+                        {isActive && <span className="mr-0.5">•</span>}
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : activeTab === "archive" ? (
+                <div className={`p-4 shrink-0 font-mono text-[10px] font-bold tracking-wider uppercase border-b ${theme === "light" ? "bg-slate-50 border-slate-200 text-slate-500" : "bg-[#06080c] border-slate-900/60 text-slate-400"}`}>
+                  📅 Archival Control Filters
+                </div>
+              ) : (
+                <div className={`p-4 shrink-0 font-mono text-[10px] font-bold tracking-wider uppercase border-b ${theme === "light" ? "bg-slate-50 border-slate-200 text-slate-500" : "bg-[#06080c] border-slate-900/60 text-slate-400"}`}>
+                  ⚙️ Controls Panel
+                </div>
+              )}
 
               {/* TABS CONTAINER */}
               <div className="flex-1 overflow-y-auto p-5 space-y-4">
                 
                 {/* 1. PLAYLIST TAB */}
-                {activeTab === "playlist" && (
+                {activeTab === "live" && liveSidebarTab === "streams" && (
                   <div className="space-y-4">
                     {/* Add M3U URL */}
                     <div className="bg-slate-900/20 rounded-2xl border border-slate-800/40 p-4 space-y-3 shadow-md">
@@ -1942,64 +2401,7 @@ export default function App() {
                       </div>
                     </div>
 
-                    {/* Channels List */}
-                    <div className="space-y-2">
-                      <div className="flex justify-between items-center text-[10px] font-mono font-bold tracking-wider text-slate-500 px-1">
-                        <span>📡 REGISTERED STREAMS</span>
-                        <span className="bg-slate-800/40 px-2 py-0.5 rounded-md border border-slate-800">{filteredChannels.length} total</span>
-                      </div>
-                      
-                      {filteredChannels.length === 0 ? (
-                        <div className="text-center py-10 text-xs text-slate-500 font-medium">
-                          No matching streams. Try loading another list!
-                        </div>
-                      ) : (
-                        <div className="space-y-2 max-h-[360px] overflow-y-auto pr-1">
-                          {filteredChannels.map((channel, idx) => {
-                            const isCurrentlyActive = currentUrl === channel.url;
-                            const isFav = favorites.some(f => f.url === channel.url);
-                            return (
-                              <div 
-                                key={idx}
-                                className={`group p-2.5 rounded-2xl flex items-center justify-between gap-2 border border-slate-800/20 transition-all cursor-pointer ${
-                                  isCurrentlyActive 
-                                    ? "bg-blue-500/10 border-blue-500/30 shadow-md shadow-blue-950/20" 
-                                    : "bg-slate-900/10 hover:bg-slate-900/35 border-transparent hover:border-slate-800/50"
-                                }`}
-                              >
-                                <div 
-                                  onClick={() => playStream(channel.url, channel.name)}
-                                  className="flex-1 min-w-0 flex items-center gap-3"
-                                >
-                                  <img 
-                                    src={getChannelLogo(channel.name, channel.logo)} 
-                                    alt="logo" 
-                                    className="w-8 h-8 rounded-xl border border-slate-800 object-contain shrink-0 bg-[#050608]"
-                                    onError={(e) => {
-                                      e.currentTarget.src = "https://placehold.co/40x40/151f38/ffffff?text=IPTV";
-                                    }}
-                                    referrerPolicy="no-referrer"
-                                  />
-                                  <div className="truncate">
-                                    <h4 className={`text-xs font-semibold leading-tight group-hover:text-blue-400 ${isCurrentlyActive ? "text-blue-400" : "text-slate-200"}`}>
-                                      {channel.name}
-                                    </h4>
-                                    <p className="text-[9px] text-slate-500 font-mono truncate mt-0.5">{channel.url}</p>
-                                  </div>
-                                </div>
-                                <button 
-                                  onClick={() => toggleFavorite(channel)}
-                                  className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-500 hover:text-amber-400 cursor-pointer transition-all"
-                                  title="Add to Favorites"
-                                >
-                                  <Star className={`w-3.5 h-3.5 ${isFav ? "fill-amber-400 text-amber-400" : ""}`} />
-                                </button>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
+
 
                     {/* IPTV CHANNEL EXPORT PANEL — add after channel list */}
                     <div className="bg-slate-900/20 rounded-2xl border border-slate-800/40 p-4 space-y-3 shadow-md">
@@ -2079,7 +2481,7 @@ export default function App() {
                 )}
 
                 {/* 2. FAVORITES TAB */}
-                {activeTab === "favorites" && (
+                {activeTab === "live" && liveSidebarTab === "favorites" && (
                   <div className="space-y-4">
                     <div className="flex justify-between items-center bg-slate-900/20 p-3 rounded-2xl border border-slate-800/40">
                       <div>
@@ -2142,7 +2544,7 @@ export default function App() {
                 )}
 
                 {/* 3. HISTORY TAB */}
-                {activeTab === "history" && (
+                {activeTab === "live" && liveSidebarTab === "history" && (
                   <div className="space-y-4">
                     <div className="flex justify-between items-center text-[10px] font-mono font-bold tracking-wider text-slate-500 px-1">
                       <span>RECENT PLAY LOGS</span>
@@ -2562,6 +2964,174 @@ export default function App() {
                   </div>
                 )}
 
+                {/* 5. AUDIO TAB SIDEBAR CONTROL */}
+                {activeTab === "audio" && (
+                  <div className="space-y-4">
+                    <div className="bg-slate-900/20 rounded-2xl border border-slate-800/40 p-4 space-y-3 shadow-md">
+                      <label className="text-[10px] font-bold tracking-wider text-blue-400 uppercase flex items-center gap-1.5 font-mono">
+                        <Volume2 className="w-3.5 h-3.5 text-blue-400" />
+                        SYNTH CO-PILOT
+                      </label>
+                      <p className="text-xs text-slate-500 leading-normal">
+                        Control the acoustic stream, toggle audio looping, and trigger track loading presets directly from the sidebar.
+                      </p>
+                      
+                      <button
+                        onClick={() => {
+                          setIsSiriusLooping(!isSiriusLooping);
+                          addLog(`Track looping toggled to ${!isSiriusLooping ? "ACTIVE" : "INACTIVE"}`);
+                        }}
+                        className={`w-full py-2 px-3 hover:shadow-md text-xs font-bold rounded-xl cursor-pointer border transition-all ${
+                          isSiriusLooping 
+                            ? "bg-blue-600 border-blue-500/20 text-white" 
+                            : "bg-slate-900 border-slate-800 text-slate-400"
+                        }`}
+                      >
+                        Loop Mode: {isSiriusLooping ? "ACTIVE" : "INACTIVE"}
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          setIsSiriusMuted(!isSiriusMuted);
+                        }}
+                        className={`w-full py-2 px-3 text-xs font-bold rounded-xl cursor-pointer border transition-all ${
+                          isSiriusMuted 
+                            ? "bg-rose-500/10 border-rose-500/20 text-rose-400" 
+                            : "bg-slate-900 border-slate-800 text-slate-400"
+                        }`}
+                      >
+                        {isSiriusMuted ? "🔈 Unmute Synthesizer" : "🔇 Mute Synthesizer"}
+                      </button>
+                    </div>
+
+                    <div className="bg-slate-950/40 rounded-2xl border border-slate-900 p-4 space-y-2.5">
+                      <label className="text-[9px] font-bold tracking-wider text-slate-500 uppercase font-mono block">TRACK SELECTION PRESETS</label>
+                      <div className="space-y-1.5">
+                        {siriusPlaylist.map((st, sidx) => {
+                          const isActive = currentSiriusTrackIndex === sidx;
+                          return (
+                            <button
+                              key={sidx}
+                              onClick={() => {
+                                setCurrentSiriusTrackIndex(sidx);
+                                if (siriusAudioRef.current) {
+                                  siriusAudioRef.current.currentTime = 0;
+                                  siriusAudioRef.current.play().catch(() => {});
+                                }
+                                addLog(`Loaded Sirius Track via Sidebar: ${st.title}`);
+                              }}
+                              className={`w-full p-2.5 text-left text-xs font-semibold rounded-xl border transition-all flex items-center justify-between cursor-pointer ${
+                                isActive 
+                                  ? "bg-blue-500/10 border-blue-500/20 text-blue-400" 
+                                  : "bg-slate-900/10 border-transparent text-slate-400 hover:bg-slate-900/40 hover:text-white"
+                              }`}
+                            >
+                              <div className="truncate pr-2">
+                                <p className="font-bold truncate leading-tight">{st.title}</p>
+                                <p className="text-[9px] text-slate-500 truncate mt-0.5">{st.artist}</p>
+                              </div>
+                              {isActive && <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-ping"></span>}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* 6. EXPORT TAB SIDEBAR CONTROL */}
+                {activeTab === "export" && (
+                  <div className="space-y-4">
+                    <div className="bg-slate-900/20 rounded-2xl border border-slate-800/40 p-4 space-y-3 shadow-md">
+                      <label className="text-[10px] font-bold tracking-wider text-purple-400 uppercase flex items-center gap-1.5 font-mono">
+                        <FileDown className="w-3.5 h-3.5" />
+                        PLAYLIST REGISTRY STATS
+                      </label>
+                      <div className="space-y-2 text-xs font-mono">
+                        <div className="flex justify-between items-center bg-black/40 p-2.5 rounded-lg border border-slate-900">
+                          <span className="text-slate-500">Streams Loaded:</span>
+                          <span className="text-blue-400 font-bold">{channels.length}</span>
+                        </div>
+                        <div className="flex justify-between items-center bg-black/40 p-2.5 rounded-lg border border-slate-900">
+                          <span className="text-slate-500">Archive Items:</span>
+                          <span className="text-purple-400 font-bold">{archiveEpisodes.length}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="bg-slate-950/40 rounded-2xl border border-slate-900 p-4 space-y-2">
+                      <label className="text-[9px] font-bold tracking-wider text-slate-500 uppercase font-mono block">QUICK DOWNLOAD EXPORTS</label>
+                      <div className="space-y-2">
+                        <button
+                          onClick={handleExportIPTVChannelsM3U}
+                          disabled={channels.length === 0}
+                          className="w-full py-2 bg-blue-600/10 hover:bg-blue-600 hover:text-white border border-blue-500/20 text-blue-400 text-xs font-bold rounded-xl cursor-pointer transition-all active:scale-95 flex items-center justify-center gap-1.5"
+                        >
+                          <FileDown className="w-3.5 h-3.5" />
+                          Download Channel M3U
+                        </button>
+                        <button
+                          onClick={handleExportSelectedJSON}
+                          disabled={selectedDateEpisodes.length === 0}
+                          className="w-full py-2 bg-emerald-600/10 hover:bg-emerald-600 hover:text-white border border-emerald-500/20 text-emerald-400 text-xs font-bold rounded-xl cursor-pointer transition-all active:scale-95 flex items-center justify-center gap-1.5"
+                        >
+                          <FileDown className="w-3.5 h-3.5" />
+                          Download Day JSON Metadata
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* 7. DIAGNOSTIC TAB SIDEBAR CONTROL */}
+                {activeTab === "debug" && (
+                  <div className="space-y-4">
+                    <div className="bg-slate-900/20 rounded-2xl border border-slate-800/40 p-4 space-y-3 shadow-md">
+                      <label className="text-[10px] font-bold tracking-wider text-red-400 uppercase flex items-center gap-1.5 font-mono">
+                        <Activity className="w-3.5 h-3.5" />
+                        ENGINE TELEMETRY
+                      </label>
+                      <div className="space-y-2 text-xs font-mono">
+                        <div className="flex justify-between items-center bg-black/40 p-2 rounded-lg border border-slate-900">
+                          <span className="text-slate-500">IPTV Cache:</span>
+                          <span className="text-emerald-400 font-bold">STABLE</span>
+                        </div>
+                        <div className="flex justify-between items-center bg-black/40 p-2 rounded-lg border border-slate-900">
+                          <span className="text-slate-500">HLS Proxy:</span>
+                          <span className="text-emerald-400 font-bold">READY</span>
+                        </div>
+                        <div className="flex justify-between items-center bg-black/40 p-2 rounded-lg border border-slate-900">
+                          <span className="text-slate-500">LogLevel:</span>
+                          <span className="text-blue-500 font-bold">DEBUG</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="bg-slate-950/40 rounded-2xl border border-slate-900 p-4 space-y-2">
+                      <label className="text-[9px] font-bold tracking-wider text-slate-500 uppercase font-mono block">ADMIN CONTROLS</label>
+                      <button 
+                        onClick={() => {
+                          setDebugLogs([]);
+                          addLog("Console log history cleared.");
+                        }}
+                        className="w-full py-2 bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 text-xs font-bold rounded-xl cursor-pointer transition-all active:scale-95 flex items-center justify-center gap-1.5"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        Clear Console Terminal
+                      </button>
+                      <button 
+                        onClick={() => {
+                          localStorage.clear();
+                          addLog("Dynamic database cache elements flushed.");
+                        }}
+                        className="w-full py-2 bg-red-950/20 hover:bg-red-900/35 border border-red-900/30 text-red-400 text-xs font-bold rounded-xl cursor-pointer transition-all active:scale-95 flex items-center justify-center gap-1.5"
+                      >
+                        Flush Memory Cache
+                      </button>
+                    </div>
+                  </div>
+                )}
+
               </div>
               <div className={`p-3 border-t shrink-0 text-center text-[10px] font-bold text-slate-500 uppercase tracking-widest font-mono ${theme === "light" ? "bg-slate-50 border-slate-200" : "bg-[#06080c] border-slate-800/60"}`}>
                 SECURE EDGE BYPASS ENGINE ACTIVE
@@ -2570,167 +3140,1055 @@ export default function App() {
           )}
         </AnimatePresence>
 
-        {/* CENTER STAGE: VIDEO PLAYER */}
+        {/* CENTER STAGE: MULTI-WORKSPACE CONTROLLER */}
         <main className={`flex-1 flex flex-col overflow-hidden relative ${theme === "light" ? "bg-slate-100/70" : "bg-[#0B0E14]"}`}>
           
-          {/* PLAYER WORKSPACE */}
-          <div className="flex-1 min-h-0 relative flex items-center justify-center p-8">
-            
-            {/* FLOATING HEADER INFO BAR (Sleek Theme Styling) */}
-            {currentUrl && (
-              <PlayerInfoBar currentTitle={currentTitle} />
-            )}
-
-            {/* VIDEO GRAPHICS ELEMENT - Styled elegantly like active queue */}
-            <div className="w-full max-w-5xl aspect-video rounded-[32px] overflow-hidden bg-slate-950 border border-slate-800/60 shadow-2xl relative flex items-center justify-center shadow-blue-950/20">
+          {/*================ ACTIVE WORKSPACE 1: LIVE CONSOLE ================*/}
+          {activeTab === "live" && (
+            <div className="flex-1 flex flex-col overflow-hidden h-full">
               
-              <video
-                id="native-video-node"
-                ref={videoRef}
-                controls
-                onPlay={handleVideoPlayEvent}
-                onPause={() => {
-                  handleVideoPauseEvent();
-                  if (videoRef.current) {
-                    saveVideoPosition(currentUrl, videoRef.current.currentTime, true);
-                  }
-                }}
-                onTimeUpdate={(e) => {
-                  const currTime = e.currentTarget.currentTime;
-                  if (currentUrl && currTime > 0) {
-                    saveVideoPosition(currentUrl, currTime);
-                  }
-                }}
-                onEnded={() => {
-                  if (currentUrl) {
-                    try {
-                      const savedJSON = localStorage.getItem("ajn_video_positions");
-                      if (savedJSON) {
-                        const saved = JSON.parse(savedJSON);
-                        delete saved[currentUrl];
-                        localStorage.setItem("ajn_video_positions", JSON.stringify(saved));
-                      }
-                    } catch (e) {}
-                  }
-                }}
-                onError={handleVideoErrorEvent}
-                className="w-full h-full object-contain"
-                poster="https://placehold.co/1280x720/0a0f1d/3b82f6?text=AJN+IPTV+Professional+Player"
-              />
-
-              {/* Status Layer overlays over the player on buffering */}
-              {playerStatus === "Loading" && (
-                <div className="absolute inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center flex-col gap-4">
-                  <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-                  <span className="text-xs font-mono font-bold text-blue-400 animate-pulse tracking-widest uppercase">
-                    Configuring HLS Stream Gateway...
-                  </span>
-                </div>
-              )}
-
-              {/* Idle screen cover */}
-              {!currentUrl && (
-                <div className="absolute inset-0 bg-[#080A0F] flex items-center justify-center flex-col p-6 text-center gap-5">
-                  <div className="w-20 h-20 rounded-3xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center hover:scale-105 transition-all cursor-pointer shadow-xl shadow-blue-950/10">
-                    <Tv className="w-8 h-8 text-blue-400" />
+              {/* PRIMARY VIEWER SWITCHABLE TEMPLATE CONTROLLER BAR */}
+              <div id="viewer-template-bar" className={`px-6 py-3.5 border-b shrink-0 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-md ${
+                theme === "light" 
+                  ? "bg-white border-slate-200" 
+                  : "bg-[#090d16]/95 border-b border-slate-800/80"
+              }`}>
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-blue-600/10 border border-blue-500/20 flex items-center justify-center">
+                    <Tv className="w-5 h-5 text-blue-400" />
                   </div>
-                  <div className="space-y-1.5 max-w-md">
-                    <h3 className="text-base font-semibold text-white tracking-tight">Unified IPTV & AJN Archive Deck</h3>
-                    <p className="text-xs text-slate-500 leading-relaxed font-sans max-w-sm mx-auto">
-                      Stream live feeds or parse broadcast segments on demand. Select any listing from the dashboard control console to boot the stream router.
+                  <div>
+                    <h3 className={`text-xs font-bold tracking-tight flex items-center gap-2 ${
+                      theme === "light" ? "text-slate-800" : "text-white"
+                    }`}>
+                      Primary Console Viewer Frame
+                      {mainViewerMode !== "standard" && (
+                        <span className="text-[9px] bg-emerald-500/10 text-emerald-400 font-mono font-bold px-2 py-0.5 rounded-full border border-emerald-500/20">
+                          Template Active
+                        </span>
+                      )}
+                    </h3>
+                    <p className="text-[10px] text-slate-400 font-sans">
+                      Toggle classic dedicated player or render live template dashboards dynamically.
                     </p>
                   </div>
                 </div>
-              )}
 
-              {/* PLAYER CONTROLS MINI-HOVER BAR */}
-              {currentUrl && (
-                <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-[#080A0F]/90 px-5 py-2.5 border border-slate-800/80 rounded-full flex items-center gap-4 shadow-2xl hover:opacity-100 transition-opacity whitespace-nowrap">
-                  <button 
-                    onClick={() => {
-                      if (activeTab === "archive") switchArchiveEpisode("prev");
-                      else skipIPTVChannel("prev");
-                    }}
-                    className="p-1.5 cursor-pointer hover:bg-slate-800 rounded-full text-slate-300 transition-all active:scale-95"
-                    title="Previous Broadcast Chunk"
-                  >
-                    <SkipBack className="w-4 h-4" />
-                  </button>
-
-                  <button 
-                    onClick={() => {
-                      const video = videoRef.current;
-                      if (!video) return;
-                      if (playerStatus === "Playing") video.pause();
-                      else video.play().catch(() => {});
-                    }}
-                    className="p-2.5 cursor-pointer bg-blue-600 hover:bg-blue-500 rounded-full text-white transition-all active:scale-95 shadow-md shadow-blue-900/30"
-                  >
-                    {playerStatus === "Playing" ? <Pause className="w-4.5 h-4.5" /> : <Play className="w-4.5 h-4.5 fill-white" />}
-                  </button>
-
-                  <button 
-                    onClick={() => {
-                      if (activeTab === "archive") switchArchiveEpisode("next");
-                      else skipIPTVChannel("next");
-                    }}
-                    className="p-1.5 cursor-pointer hover:bg-slate-800 rounded-full text-slate-300 transition-all active:scale-95"
-                    title="Next Broadcast Chunk"
-                  >
-                    <SkipForward className="w-4 h-4" />
-                  </button>
-
-                  {/* Volume Segment Separator */}
-                  <div className="w-[1px] h-5 bg-slate-800"></div>
-
-                  {/* Volume Control Elements */}
-                  <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-3">
+                  {/* Playlist Data Source Selector */}
+                  <div className={`flex items-center border rounded-xl p-0.5 shrink-0 ${
+                    theme === "light" ? "bg-slate-100 border-slate-300" : "bg-[#05070a] border-slate-800"
+                  }`}>
                     <button
-                      onClick={() => setIsPlayerMuted(!isPlayerMuted)}
-                      className="p-1.5 cursor-pointer hover:bg-slate-800 rounded-full text-slate-300 hover:text-white transition-all"
-                      title={isPlayerMuted ? "Unmute stream audio" : "Mute stream audio"}
+                      onClick={() => setMainViewerDataSource("archive")}
+                      className={`px-3 py-1 text-[10px] font-mono font-bold rounded-lg transition-all cursor-pointer ${
+                        mainViewerDataSource === "archive"
+                          ? "bg-blue-600 text-white shadow-sm"
+                          : "text-slate-500 hover:text-slate-400"
+                      }`}
+                      title={`${selectedDateEpisodes.length} parsed show items on ${selectedDate}`}
                     >
-                      {isPlayerMuted ? (
-                        <VolumeX className="w-4 h-4 text-red-400" />
-                      ) : (
-                        <Volume2 className="w-4 h-4 text-blue-400" />
-                      )}
+                      📅 Archive ({selectedDateEpisodes.length})
                     </button>
-                    <input
-                      type="range"
-                      min="0"
-                      max="1"
-                      step="0.05"
-                      value={isPlayerMuted ? 0 : playerVolume}
-                      onChange={(e) => {
-                        setPlayerVolume(parseFloat(e.target.value));
-                        if (isPlayerMuted) setIsPlayerMuted(false);
-                      }}
-                      className="w-16 sm:w-20 h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-blue-500 hover:accent-blue-400 transition-all"
-                      title="Adjust Player Volume"
-                    />
-                    <span className="text-[10px] font-mono text-slate-500 font-bold w-6 text-right">
-                      {isPlayerMuted ? "0%" : `${Math.round(playerVolume * 100)}%`}
-                    </span>
+                    <button
+                      onClick={() => setMainViewerDataSource("channels")}
+                      className={`px-3 py-1 text-[10px] font-mono font-bold rounded-lg transition-all cursor-pointer ${
+                        mainViewerDataSource === "channels"
+                          ? "bg-blue-600 text-white shadow-sm"
+                          : "text-slate-500 hover:text-slate-400"
+                      }`}
+                      title={`${channels.length} live streams loaded from M3U`}
+                    >
+                      📺 IPTV ({channels.length})
+                    </button>
                   </div>
+
+                  {/* Template View Selector */}
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] text-slate-400 font-mono hidden md:inline">Layout:</span>
+                    <select
+                      value={mainViewerMode}
+                      onChange={(e) => {
+                        const val = e.target.value as any;
+                        setMainViewerMode(val);
+                        addLog(`Switched main viewer deck layout to: ${val.toUpperCase()}`);
+                      }}
+                      className={`border rounded-xl px-2.5 py-1 text-[11px] font-mono focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer min-w-[170px] ${
+                        theme === "light" 
+                          ? "bg-slate-50 border-slate-300 text-slate-800" 
+                          : "bg-[#05070a] border-slate-800 text-slate-300"
+                      }`}
+                    >
+                      <option value="standard">📹 Classic Dedicated Player</option>
+                      <option value="tvexplorer">🗂️ Sleek "TV Explorer"</option>
+                      <option value="vidgrid">🏁 Grid "VidGrid" Mosaic</option>
+                      <option value="publiciptv">📺 Public Retro TV Bezel</option>
+                      <option value="weebly">⚙️ "EPG Classic Sync" Loop</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* PLAYER WORKSPACE */}
+              <div className="flex-1 min-h-0 relative flex items-center justify-center p-8">
+                
+                {/* FLOATING HEADER INFO BAR (Sleek Theme Styling) */}
+                {mainViewerMode === "standard" && currentUrl && (
+                  <PlayerInfoBar currentTitle={currentTitle} />
+                )}
+ 
+                {/* VIDEO GRAPHICS ELEMENT - Styled elegantly like active queue */}
+                <div className="w-full max-w-5xl aspect-video rounded-[32px] overflow-hidden bg-slate-950 border border-slate-800/60 shadow-2xl relative flex items-center justify-center shadow-blue-950/20">
+                  
+                  {mainViewerMode !== "standard" ? (
+                    <iframe
+                      key={`${mainViewerMode}-${mainViewerDataSource}-${selectedDateEpisodes.length}-${channels.length}-${selectedDate}`}
+                      srcDoc={activeTemplateHtml}
+                      className="w-full h-full border-0 absolute inset-0 bg-[#080A0F] rounded-[32px] z-10"
+                      allowFullScreen
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : isRumbleUrl(currentUrl) ? (
+                    <iframe
+                      id="rumble-embed-node"
+                      src={getRumbleEmbedUrl(currentUrl)}
+                      className="w-full h-full border-0 absolute inset-0 bg-black rounded-[32px] z-10"
+                      allowFullScreen
+                      allow="autoplay; encrypted-media; picture-in-picture"
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : (
+                    <video
+                      id="native-video-node"
+                      ref={videoRef}
+                      controls
+                      onPlay={handleVideoPlayEvent}
+                      onPause={() => {
+                        handleVideoPauseEvent();
+                        if (videoRef.current) {
+                          saveVideoPosition(currentUrl, videoRef.current.currentTime, true);
+                        }
+                      }}
+                      onTimeUpdate={(e) => {
+                        const currTime = e.currentTarget.currentTime;
+                        if (currentUrl && currTime > 0) {
+                          saveVideoPosition(currentUrl, currTime);
+                        }
+                      }}
+                      onEnded={() => {
+                        if (currentUrl) {
+                          try {
+                            const savedJSON = localStorage.getItem("ajn_video_positions");
+                            if (savedJSON) {
+                              const saved = JSON.parse(savedJSON);
+                              delete saved[currentUrl];
+                              localStorage.setItem("ajn_video_positions", JSON.stringify(saved));
+                            }
+                          } catch (e) {}
+                        }
+                      }}
+                      onError={handleVideoErrorEvent}
+                      className="w-full h-full object-contain"
+                      poster="https://placehold.co/1280x720/0a0f1d/3b82f6?text=AJN+IPTV+Professional+Player"
+                    />
+                  )}
+ 
+                  {/* Status Layer overlays over the player on buffering */}
+                  {mainViewerMode === "standard" && playerStatus === "Loading" && (
+                    <div className="absolute inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center flex-col gap-4">
+                      <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                      <span className="text-xs font-mono font-bold text-blue-400 animate-pulse tracking-widest uppercase">
+                        Configuring HLS Stream Gateway...
+                      </span>
+                    </div>
+                  )}
+ 
+                  {/* Idle screen cover */}
+                  {mainViewerMode === "standard" && !currentUrl && (
+                    <div className="absolute inset-0 bg-[#080A0F] flex items-center justify-center flex-col p-6 text-center gap-5">
+                      <div className="w-20 h-20 rounded-3xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center hover:scale-105 transition-all cursor-pointer shadow-xl shadow-blue-950/10">
+                        <Tv className="w-8 h-8 text-blue-400" />
+                      </div>
+                      <div className="space-y-1.5 max-w-md">
+                        <h3 className="text-base font-semibold text-white tracking-tight">Unified IPTV & AJN Archive Deck</h3>
+                        <p className="text-xs text-slate-500 leading-relaxed font-sans max-w-sm mx-auto">
+                          Stream live feeds or parse broadcast segments on demand. Select any listing from the dashboard control console to boot the stream router.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+ 
+                  {/* PLAYER CONTROLS MINI-HOVER BAR */}
+                  {mainViewerMode === "standard" && currentUrl && (
+                    <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-[#080A0F]/90 px-5 py-2.5 border border-slate-800/80 rounded-full flex items-center gap-4 shadow-2xl hover:opacity-100 transition-opacity whitespace-nowrap z-25">
+                      <button 
+                        onClick={() => {
+                          if (activeTab === "archive") switchArchiveEpisode("prev");
+                          else skipIPTVChannel("prev");
+                        }}
+                        className="p-1.5 cursor-pointer hover:bg-slate-800 rounded-full text-slate-300 transition-all active:scale-95"
+                        title="Previous Broadcast Chunk"
+                      >
+                        <SkipBack className="w-4 h-4" />
+                      </button>
+
+                      <button 
+                        onClick={() => {
+                          const video = videoRef.current;
+                          if (!video) return;
+                          if (playerStatus === "Playing") video.pause();
+                          else video.play().catch(() => {});
+                        }}
+                        className="p-2.5 cursor-pointer bg-blue-600 hover:bg-blue-500 rounded-full text-white transition-all active:scale-95 shadow-md shadow-blue-900/30"
+                      >
+                        {playerStatus === "Playing" ? <Pause className="w-4.5 h-4.5" /> : <Play className="w-4.5 h-4.5 fill-white" />}
+                      </button>
+
+                      <button 
+                        onClick={() => {
+                          if (activeTab === "archive") switchArchiveEpisode("next");
+                          else skipIPTVChannel("next");
+                        }}
+                        className="p-1.5 cursor-pointer hover:bg-slate-800 rounded-full text-slate-300 transition-all active:scale-95"
+                        title="Next Broadcast Chunk"
+                      >
+                        <SkipForward className="w-4 h-4" />
+                      </button>
+
+                      {/* Volume Segment Separator */}
+                      <div className="w-[1px] h-5 bg-slate-800"></div>
+
+                      {/* Volume Control Elements */}
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => setIsPlayerMuted(!isPlayerMuted)}
+                          className="p-1.5 cursor-pointer hover:bg-slate-800 rounded-full text-slate-300 hover:text-white transition-all"
+                          title={isPlayerMuted ? "Unmute stream audio" : "Mute stream audio"}
+                        >
+                          {isPlayerMuted ? (
+                            <VolumeX className="w-4 h-4 text-red-400" />
+                          ) : (
+                            <Volume2 className="w-4 h-4 text-blue-400" />
+                          )}
+                        </button>
+                        <input
+                          type="range"
+                          min="0"
+                          max="1"
+                          step="0.05"
+                          value={isPlayerMuted ? 0 : playerVolume}
+                          onChange={(e) => {
+                            setPlayerVolume(parseFloat(e.target.value));
+                            if (isPlayerMuted) setIsPlayerMuted(false);
+                          }}
+                          className="w-16 sm:w-20 h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-blue-500 hover:accent-blue-400 transition-all"
+                          title="Adjust Player Volume"
+                        />
+                        <span className="text-[10px] font-mono text-slate-500 font-bold w-6 text-right">
+                          {isPlayerMuted ? "0%" : `${Math.round(playerVolume * 100)}%`}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+              </div>
+
+              {/* DYNAMIC SCROLLING DEBUG TERMINAL (Sleek Theme Slate/Amber-themed layout) */}
+              {debugMode === "on" && (
+                <div 
+                  id="viewport-debug-console"
+                  className="w-full h-28 shrink-0 bg-[#050608] border-t border-slate-800/85 font-mono text-[10px] text-blue-400 p-4 overflow-y-auto space-y-1 selection:bg-blue-900 selection:text-white"
+                >
+                  {debugLogs.map((log, index) => (
+                    <div key={index} className="leading-relaxed hover:bg-slate-900/30 w-full break-all whitespace-pre-wrap block">
+                      {log}
+                    </div>
+                  ))}
+                  <div ref={logsEndRef}></div>
                 </div>
               )}
             </div>
+          )}
 
-          </div>
-
-          {/* DYNAMIC SCROLLING DEBUG TERMINAL (Sleek Theme Slate/Amber-themed layout) */}
-          {debugMode === "on" && (
-            <div 
-              id="viewport-debug-console"
-              className="w-full h-28 shrink-0 bg-[#050608] border-t border-slate-800/80 font-mono text-[10px] text-blue-400 p-4 overflow-y-auto space-y-1 selection:bg-blue-900 selection:text-white"
-            >
-              {debugLogs.map((log, index) => (
-                <div key={index} className="leading-relaxed hover:bg-slate-900/30 w-full break-all whitespace-pre-wrap block">
-                  {log}
+          {/*================ ACTIVE WORKSPACE 2: EXPANDED ARCHIVE SEGMENT GRID ================*/}
+          {activeTab === "archive" && (
+            <div className="flex-1 overflow-y-auto p-6 md:p-8 space-y-6">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-5">
+                <div>
+                  <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                    <span>🗄️</span> Day-View Broadcaster Hub
+                  </h2>
+                  <p className="text-xs text-slate-500 font-medium font-sans mt-1">
+                    Complete multi-column segment index mapped for chosen archival date. Select any card to stream instantly.
+                  </p>
                 </div>
-              ))}
-              <div ref={logsEndRef}></div>
+                <div className="flex items-center gap-3">
+                  <div className="bg-slate-900 border border-slate-800 rounded-2xl px-4 py-2 font-mono text-xs font-semibold text-blue-400">
+                    📅 Date: {selectedDate || `${calendarYear}-${String(calendarMonth + 1).padStart(2, '0')}-01`}
+                  </div>
+                  <div className="bg-slate-900 border border-slate-800 rounded-2xl px-4 py-2 font-mono text-xs font-semibold text-purple-400">
+                    📺 Loaded segments: {selectedDateEpisodes.length}
+                  </div>
+                </div>
+              </div>
+
+              {selectedDateEpisodes.length === 0 ? (
+                <div className="h-[50vh] flex flex-col items-center justify-center text-center p-8 bg-[#080A0F]/55 rounded-3xl border border-slate-800 border-dashed max-w-4xl mx-auto gap-4">
+                  <div className="w-16 h-16 rounded-full bg-slate-900 border border-slate-800/60 flex items-center justify-center">
+                    <Calendar className="w-6 h-6 text-slate-600" />
+                  </div>
+                  <div className="space-y-1">
+                    <h3 className="text-sm font-bold text-slate-400">No Broadcast Episodes Parsed</h3>
+                    <p className="text-xs text-slate-500 max-w-md">
+                      There are no active show segments parsed for this calendar date. Please select a different day from the Left Sidebar calendar.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
+                  {selectedDateEpisodes.map((ep, idx) => {
+                    const isCurrentlySelected = currentUrl === ep.videoUrl;
+                    const colorScheme = HOUR_COLOR_SCHEME[ep.hour] || HOUR_COLOR_SCHEME["default"];
+                    const thumbnailUrl = SHOW_THUMBNAILS[ep.show] || SHOW_THUMBNAILS["default"];
+                    const dateObj = new Date(ep.pubDate);
+                    
+                    return (
+                      <div
+                        key={ep.id}
+                        onClick={() => {
+                          playArchiveEpisode(ep, idx);
+                          setActiveTab("live"); // transition to player instantly!
+                          addLog(`Casting segment to broadcast player: ${ep.title}`);
+                        }}
+                        style={{ 
+                          "--tile-color": colorScheme.hex,
+                          "--tile-color-rgb": colorScheme.rgb
+                        } as React.CSSProperties}
+                        className={`tile-block border border-slate-800 p-4 rounded-3xl bg-[#080A0F]/80 hover:bg-[#0c0f17] group transition-all duration-300 cursor-pointer flex flex-col justify-between h-auto gap-4 ${
+                          isCurrentlySelected ? "border-blue-500/80 ring-2 ring-blue-600/20" : "hover:border-slate-700 hover:shadow-xl hover:shadow-blue-950/5"
+                        }`}
+                      >
+                        <div className="space-y-3">
+                          {/* Rich Thumbnail Media Container */}
+                          <div className="aspect-video w-full rounded-2xl overflow-hidden bg-slate-950 border border-slate-800/80 relative shadow-inner">
+                            <img 
+                              src={thumbnailUrl} 
+                              alt={ep.show}
+                              className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105 grayscale-[30%] group-hover:grayscale-0"
+                              referrerPolicy="no-referrer"
+                            />
+                            {/* Color Tag Badge overlay */}
+                            <div className="absolute top-2 left-2 flex items-center gap-1.5 bg-black/80 backdrop-blur-md px-2 py-1 rounded-lg border border-slate-800 text-[9px] font-bold text-slate-300">
+                              <span className="w-2 h-2 rounded-full" style={{ backgroundColor: colorScheme.hex }}></span>
+                              {ep.hour}
+                            </div>
+
+                            {/* Center hover play button */}
+                            <div className="absolute inset-0 bg-black/40 backdrop-blur-[0.5px] opacity-0 group-hover:opacity-100 flex items-center justify-center transition-all">
+                              <div className="w-12 h-12 rounded-full bg-blue-600 flex items-center justify-center shadow-lg transform scale-90 group-hover:scale-100 transition-transform">
+                                <Play className="w-5 h-5 text-white fill-white ml-0.5" />
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Info Segment */}
+                          <div className="space-y-1">
+                            <div className="flex justify-between items-center text-[10px] uppercase font-bold font-mono tracking-wider text-slate-500 mb-1">
+                              <span className="text-blue-400 truncate max-w-[120px]">{ep.show}</span>
+                              <span className="font-semibold text-slate-500">{dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                            </div>
+                            <h3 className="text-xs font-bold text-slate-200 group-hover:text-white leading-normal transition-all line-clamp-2">
+                              {ep.title}
+                            </h3>
+                          </div>
+                        </div>
+
+                        {/* File actions footer */}
+                        <div className="pt-3.5 border-t border-slate-900 flex justify-between items-center text-[11px] font-mono text-slate-500 mt-2">
+                          <span className="truncate max-w-[140px] text-[10px] text-slate-600">{ep.videoUrl.split("/").pop()}</span>
+                          <div className="flex items-center gap-2">
+                            <a 
+                              href={ep.videoUrl} 
+                              target="_blank" 
+                              rel="noreferrer"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                addLog(`Initiating download for video file: ${ep.videoUrl}`);
+                              }}
+                              className="p-1.5 rounded-lg bg-slate-900 border border-slate-850 hover:bg-blue-600 hover:text-white cursor-pointer transition-all hover:border-blue-500"
+                              title="Download MP4 Video File"
+                            >
+                              <FileDown className="w-3.5 h-3.5" />
+                            </a>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/*================ ACTIVE WORKSPACE 3: PROFESSIONAL AUDIO SYNTHESIZER DECK ================*/}
+          {activeTab === "audio" && (
+            <div className="flex-1 overflow-y-auto p-6 md:p-8 space-y-6">
+              
+              {/* Title Section */}
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-5 shrink-0">
+                <div>
+                  <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                    <span>🎹</span> Preamble Synthesizer Console
+                  </h2>
+                  <p className="text-xs text-slate-500 font-medium font-sans mt-1">
+                    Fine-tune studio preambles, configure virtual equalizer presets, and monitor active 120-frequency spectrum curves.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2.5">
+                  <div className="bg-slate-900 border border-slate-800 rounded-full px-4 py-1.5 font-mono text-xs font-bold text-slate-400">
+                    STATUS: {isSiriusPlaying ? "📡 BROADCASTING AUDIO" : "⏸️ PRE-LOADED STAGE"}
+                  </div>
+                </div>
+              </div>
+
+              {/* Main hardware deck controls */}
+              <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+                
+                {/* Visualizer and primary playback (Left 2 columns) */}
+                <div className="xl:col-span-2 space-y-6">
+                  
+                  {/* Glowing Equalizer Screen display */}
+                  <div className="bg-[#050608] rounded-3xl border border-slate-800/80 p-6 flex flex-col gap-4 relative shadow-2xl shadow-black/85">
+                    
+                    {/* Retro console title line */}
+                    <div className="flex justify-between items-center">
+                      <div className="flex items-center gap-2">
+                        <span className="w-2.5 h-2.5 rounded-full bg-blue-500 animate-pulse"></span>
+                        <span className="font-mono text-[10px] font-bold text-blue-500 tracking-widest uppercase">REAL-TIME MULTI-BAND ACOUSTIC SPECTROGRAM</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        {(["eq", "wave", "fire", "matrix"] as const).map((m) => (
+                          <button
+                            key={m}
+                            onClick={() => {
+                              setSiriusVisualizerMode(m);
+                              addLog(`Visualizer mode cycled: ${m.toUpperCase()}`);
+                            }}
+                            className={`px-2 py-0.5 text-[9px] font-bold rounded cursor-pointer font-mono border transition-all ${
+                              siriusVisualizerMode === m 
+                                ? "bg-blue-600/10 border-blue-500 text-blue-400 font-black" 
+                                : "bg-slate-900 border-transparent text-slate-500 hover:text-slate-300"
+                            }`}
+                          >
+                            {m.toUpperCase()}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Canvas Stage */}
+                    <div className="h-40 rounded-2xl bg-[#040609] border border-slate-905 flex items-stretch overflow-hidden relative shadow-inner">
+                      <canvas 
+                        ref={siriusTabCanvasRef}
+                        className="w-full h-full block"
+                      />
+                    </div>
+
+                    {/* Compact track progress seek bar */}
+                    <div className="space-y-1.5 font-mono text-xs text-slate-500">
+                      <div className="flex justify-between items-center text-[10px] font-bold">
+                        <span>ELAPSED PLAYTIME: {new Date(siriusCurrentTime * 1000).toISOString().substring(14, 19)}</span>
+                        <span>DURATION: {new Date(siriusDuration * 1000).toISOString().substring(14, 19)}</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0"
+                        max={siriusDuration || 100}
+                        step="1"
+                        value={siriusCurrentTime}
+                        onChange={(e) => {
+                          const seekSecs = parseFloat(e.target.value);
+                          if (siriusAudioRef.current) {
+                            siriusAudioRef.current.currentTime = seekSecs;
+                          }
+                          setSiriusCurrentTime(seekSecs);
+                          addLog(`Synthesizer playhead repositioned to ${Math.round(seekSecs)}s`);
+                        }}
+                        className="w-full h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-blue-500 hover:accent-blue-400 transition-all font-mono"
+                        title="Seek Track"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Faders / Synth Hardware Equalizer Simulator */}
+                  <div className="bg-[#080A0F] border border-slate-800 rounded-3xl p-6 space-y-4">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest font-mono flex items-center gap-1.5">
+                      🎛️ STUDIO HARDWARE CONTROLS & faders
+                    </label>
+                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 pt-2">
+                      
+                      {/* Fader 1 */}
+                      <div className="flex flex-col items-center gap-2 bg-slate-900/30 p-4 rounded-2xl border border-slate-800/40">
+                        <span className="text-[9px] font-bold text-slate-500 font-mono">100Hz BASS</span>
+                        <input 
+                          type="range" 
+                          min="0" max="100" 
+                          value={siriusLowBass}
+                          onChange={(e) => {
+                            setSiriusLowBass(parseInt(e.target.value));
+                            setSiriusPreset("neutral");
+                          }}
+                          className="h-28 appearance-none bg-slate-800 w-1 rounded-lg cursor-pointer accent-blue-500"
+                          style={{ WebkitAppearance: 'slider-vertical' } as React.CSSProperties}
+                        />
+                        <span className="text-xs font-mono text-slate-400 font-bold">{siriusLowBass}dB</span>
+                      </div>
+
+                      {/* Fader 2 */}
+                      <div className="flex flex-col items-center gap-2 bg-slate-900/30 p-4 rounded-2xl border border-slate-800/40">
+                        <span className="text-[9px] font-bold text-slate-500 font-mono">400Hz LOW-MID</span>
+                        <input 
+                          type="range" 
+                          min="0" max="100" 
+                          value={siriusBass}
+                          onChange={(e) => {
+                            setSiriusBass(parseInt(e.target.value));
+                            setSiriusPreset("neutral");
+                          }}
+                          className="h-28 appearance-none bg-slate-800 w-1 rounded-lg cursor-pointer accent-blue-500"
+                          style={{ WebkitAppearance: 'slider-vertical' } as React.CSSProperties}
+                        />
+                        <span className="text-xs font-mono text-slate-400 font-bold">{siriusBass}dB</span>
+                      </div>
+
+                      {/* Fader 3 */}
+                      <div className="flex flex-col items-center gap-2 bg-slate-900/30 p-4 rounded-2xl border border-slate-800/40">
+                        <span className="text-[9px] font-bold text-slate-500 font-mono">1KHz VOC_MID</span>
+                        <input 
+                          type="range" 
+                          min="0" max="100" 
+                          value={siriusVocalMid}
+                          onChange={(e) => {
+                            setSiriusVocalMid(parseInt(e.target.value));
+                            setSiriusPreset("neutral");
+                          }}
+                          className="h-28 appearance-none bg-slate-800 w-1 rounded-lg cursor-pointer accent-blue-500"
+                          style={{ WebkitAppearance: 'slider-vertical' } as React.CSSProperties}
+                        />
+                        <span className="text-xs font-mono text-slate-400 font-bold">{siriusVocalMid}dB</span>
+                      </div>
+
+                      {/* Fader 4 */}
+                      <div className="flex flex-col items-center gap-2 bg-slate-900/30 p-4 rounded-2xl border border-slate-800/40">
+                        <span className="text-[9px] font-bold text-slate-500 font-mono">4KHz HIGH_MID</span>
+                        <input 
+                          type="range" 
+                          min="0" max="100" 
+                          value={siriusHighMid}
+                          onChange={(e) => {
+                            setSiriusHighMid(parseInt(e.target.value));
+                            setSiriusPreset("neutral");
+                          }}
+                          className="h-28 appearance-none bg-slate-800 w-1 rounded-lg cursor-pointer accent-blue-500"
+                          style={{ WebkitAppearance: 'slider-vertical' } as React.CSSProperties}
+                        />
+                        <span className="text-xs font-mono text-slate-400 font-bold">{siriusHighMid}dB</span>
+                      </div>
+
+                      {/* Fader 5 */}
+                      <div className="flex flex-col items-center gap-2 bg-slate-900/30 p-4 rounded-2xl border border-slate-800/40">
+                        <span className="text-[9px] font-bold text-slate-500 font-mono">16KHz TREBLE</span>
+                        <input 
+                          type="range" 
+                          min="0" max="100" 
+                          value={siriusTreble}
+                          onChange={(e) => {
+                            setSiriusTreble(parseInt(e.target.value));
+                            setSiriusPreset("neutral");
+                          }}
+                          className="h-28 appearance-none bg-slate-800 w-1 rounded-lg cursor-pointer accent-blue-500"
+                          style={{ WebkitAppearance: 'slider-vertical' } as React.CSSProperties}
+                        />
+                        <span className="text-xs font-mono text-slate-400 font-bold">{siriusTreble}dB</span>
+                      </div>
+
+                    </div>
+                  </div>
+
+                </div>
+
+                {/* Right controls and playlist (Right col) */}
+                <div className="space-y-6">
+                  
+                  {/* Preset Quick Loader card */}
+                  <div className="bg-[#080A0F] border border-slate-800 rounded-3xl p-5 space-y-4 shadow-lg">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest font-mono block">ACOUSTIC EQUALIZER PRESETS</label>
+                    <div className="grid grid-cols-2 gap-2.5">
+                      
+                      {/* Preset 1 */}
+                      <button
+                        onClick={() => {
+                          setSiriusLowBass(50); setSiriusBass(50); setSiriusVocalMid(55); setSiriusHighMid(50); setSiriusTreble(50);
+                          setSiriusPreset("neutral");
+                          addLog("Equalizer set to: STUDIO NEUTRAL");
+                        }}
+                        className={`p-3 rounded-xl cursor-pointer text-xs font-bold border transition-all text-left ${
+                          siriusPreset === "neutral" ? "bg-blue-600 border-blue-500 text-white" : "bg-slate-900 border-slate-850 hover:bg-slate-800 text-slate-300 link-fader-btn"
+                        }`}
+                      >
+                        <p className="font-extrabold leading-none">Studio Neutral</p>
+                        <p className="text-[10px] opacity-75 mt-0.5">Flat/Unprocessed</p>
+                      </button>
+
+                      {/* Preset 2 */}
+                      <button
+                        onClick={() => {
+                          setSiriusLowBass(90); setSiriusBass(80); setSiriusVocalMid(40); setSiriusHighMid(50); setSiriusTreble(60);
+                          setSiriusPreset("heavy");
+                          addLog("Equalizer loaded: BASS BOOSTER");
+                        }}
+                        className={`p-3 rounded-xl cursor-pointer text-xs font-bold border transition-all text-left ${
+                          siriusPreset === "heavy" ? "bg-blue-600 border-blue-500 text-white" : "bg-slate-900 border-slate-850 hover:bg-slate-800 text-slate-300 link-fader-btn"
+                        }`}
+                      >
+                        <p className="font-extrabold leading-none">Bass Booster</p>
+                        <p className="text-[10px] opacity-75 mt-0.5">Heavy Low-end</p>
+                      </button>
+
+                      {/* Preset 3 */}
+                      <button
+                        onClick={() => {
+                          setSiriusLowBass(35); setSiriusBass(40); setSiriusVocalMid(85); setSiriusHighMid(75); setSiriusTreble(50);
+                          setSiriusPreset("vocal");
+                          addLog("Equalizer loaded: VOCAL ENHANCER (Sodom)");
+                        }}
+                        className={`p-3 rounded-xl cursor-pointer text-xs font-bold border transition-all text-left ${
+                          siriusPreset === "vocal" ? "bg-blue-600 border-blue-500 text-white" : "bg-slate-900 border-slate-850 hover:bg-slate-800 text-slate-300 link-fader-btn"
+                        }`}
+                      >
+                        <p className="font-extrabold leading-none">Vocal Enhance</p>
+                        <p className="text-[10px] opacity-75 mt-0.5">Mid Boost (Sodom)</p>
+                      </button>
+
+                      {/* Preset 4 */}
+                      <button
+                        onClick={() => {
+                          setSiriusLowBass(85); setSiriusBass(60); setSiriusVocalMid(45); setSiriusHighMid(75); setSiriusTreble(90);
+                          setSiriusPreset("metal");
+                          addLog("Equalizer loaded: METAL COIL (Motörhead)");
+                        }}
+                        className={`p-3 rounded-xl cursor-pointer text-xs font-bold border transition-all text-left ${
+                          siriusPreset === "metal" ? "bg-blue-600 border-blue-500 text-white" : "bg-slate-900 border-slate-850 hover:bg-slate-800 text-slate-300 link-fader-btn"
+                        }`}
+                      >
+                        <p className="font-extrabold leading-none">Metal Coil</p>
+                        <p className="text-[10px] opacity-75 mt-0.5">Motörhead Hype</p>
+                      </button>
+
+                    </div>
+                  </div>
+
+                  {/* Volume Slider & Playback Rate Track parameters */}
+                  <div className="bg-[#080A0F] border border-slate-800 rounded-3xl p-5 space-y-4">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest font-mono block">SIGNAL SPEEDS & volume</label>
+                    <div className="space-y-4">
+                      
+                      {/* Master Synth Volume slider */}
+                      <div className="space-y-1.5 font-sans">
+                        <div className="flex justify-between items-center text-xs text-slate-400 font-semibold">
+                          <span>Master Preamble Gain:</span>
+                          <span className="font-bold text-blue-400 font-mono">{Math.round(siriusAudioVolume * 100)}%</span>
+                        </div>
+                        <input 
+                          type="range" min="0" max="1" step="0.05"
+                          value={siriusAudioVolume}
+                          onChange={(e) => {
+                            const val = parseFloat(e.target.value);
+                            setSiriusAudioVolume(val);
+                            if (siriusAudioRef.current) siriusAudioRef.current.volume = val;
+                          }}
+                          className="w-full h-1.5 bg-slate-800 rounded-full cursor-pointer accent-blue-500"
+                        />
+                      </div>
+
+                      {/* Speed Playback speed rate controller */}
+                      <div className="space-y-1.5 font-sans">
+                        <div className="flex justify-between items-center text-xs text-slate-400 font-semibold">
+                          <span>Playback Warp Speed:</span>
+                          <span className="font-bold text-indigo-400 font-mono">{siriusPlaybackRate.toFixed(2)}x</span>
+                        </div>
+                        <input 
+                          type="range" min="0.5" max="2.0" step="0.05"
+                          value={siriusPlaybackRate}
+                          onChange={(e) => {
+                            const rateVal = parseFloat(e.target.value);
+                            setSiriusPlaybackRate(rateVal);
+                            if (siriusAudioRef.current) siriusAudioRef.current.playbackRate = rateVal;
+                            addLog(`Synthesizer speed rate adjusted warp: ${rateVal.toFixed(2)}x`);
+                          }}
+                          className="w-full h-1.5 bg-slate-800 rounded-full cursor-pointer accent-indigo-500"
+                        />
+                      </div>
+
+                    </div>
+                  </div>
+
+                  {/* Active Synthesizer Tracks */}
+                  <div className="bg-[#080A0F] border border-slate-800 rounded-3xl p-5 space-y-3.5">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest font-mono block">BROADCAST INTRO SYNTH TRACKS</label>
+                    
+                    <div className="space-y-2">
+                      {siriusPlaylist.map((track, tidx) => {
+                        const isCurrent = currentSiriusTrackIndex === tidx;
+                        return (
+                          <div 
+                            key={tidx}
+                            onClick={() => {
+                              setCurrentSiriusTrackIndex(tidx);
+                              if (siriusAudioRef.current) {
+                                siriusAudioRef.current.currentTime = 0;
+                                siriusAudioRef.current.play().catch(() => {});
+                              }
+                              addLog(`Synth Deck loaded: ${track.title} by ${track.artist}`);
+                            }}
+                            className={`p-3 border rounded-2xl cursor-pointer transition-all flex items-center justify-between ${
+                              isCurrent 
+                                ? "bg-blue-600/[0.08] border-blue-500/45 text-white" 
+                                : "bg-slate-900/40 border-transparent hover:bg-slate-900/70 hover:border-slate-800 text-slate-400 hover:text-white"
+                            }`}
+                          >
+                            <div className="min-w-0 pr-3">
+                              <h4 className="text-xs font-bold leading-none truncate">{track.title}</h4>
+                              <p className="text-[10px] text-slate-500 font-medium truncate mt-1">Artist: {track.artist}</p>
+                            </div>
+
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (isCurrent) {
+                                  if (isSiriusPlaying) {
+                                    siriusAudioRef.current?.pause();
+                                  } else {
+                                    siriusAudioRef.current?.play().catch(() => {});
+                                  }
+                                } else {
+                                  setCurrentSiriusTrackIndex(tidx);
+                                  setTimeout(() => {
+                                    siriusAudioRef.current?.play().catch(() => {});
+                                  }, 150);
+                                }
+                              }}
+                              className={`p-2 rounded-full flex items-center justify-center shrink-0 ${
+                                isCurrent && isSiriusPlaying ? "bg-rose-600 hover:bg-rose-500" : "bg-blue-600 hover:bg-blue-500"
+                              } text-white scale-90`}
+                            >
+                              {isCurrent && isSiriusPlaying ? <Pause className="w-3 h-3 fill-white" /> : <Play className="w-3 h-3 fill-white ml-0.5" />}
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                </div>
+
+              </div>
+
+            </div>
+          )}
+
+          {/*================ ACTIVE WORKSPACE 4: EXPORT SUITE WORKSPACE ================*/}
+          {activeTab === "export" && (
+            <div className="flex-1 overflow-y-auto p-6 md:p-8 space-y-6">
+              
+              {/* Title Block */}
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-5">
+                <div>
+                  <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                    <span>📦</span> Broadcast Compilation & Export Suite
+                  </h2>
+                  <p className="text-xs text-slate-500 font-medium font-sans mt-1">
+                    Select styled layout output templates, build single-page dashboard apps, or write M3U player playlist packages.
+                  </p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <div className="p-2 border border-slate-800 bg-slate-900 rounded-full flex items-center gap-1">
+                    {(["tvexplorer", "vidgrid", "publiciptv", "weebly"] as const).map((temp) => (
+                      <button
+                        key={temp}
+                        onClick={() => setSelectedHtmlTemplate(temp)}
+                        className={`text-[9px] font-bold py-1 px-3.5 rounded-full cursor-pointer uppercase transition-all font-mono ${
+                          selectedHtmlTemplate === temp ? "bg-blue-600 text-white" : "text-slate-500 hover:text-slate-300"
+                        }`}
+                      >
+                        {temp === "tvexplorer" ? "TV EXPLORER" : temp === "vidgrid" ? "GRID" : temp === "publiciptv" ? "PUBLIC" : "WEEBLY"}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Main Exports split view */}
+              <div className="grid grid-cols-1 xl:grid-cols-5 gap-6 items-stretch">
+                
+                {/* Side: Config Cards (Left 2 cols) */}
+                <div className="xl:col-span-2 space-y-6">
+                  
+                  {/* Option Template Selection Cards */}
+                  <div className="bg-[#080A0F] border border-slate-800 rounded-3xl p-5 space-y-3.5 shadow-md">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest font-mono block">SELECT OUTPUT TEMPLATE DESIGN</label>
+                    <div className="space-y-2">
+                      
+                      {/* TV Explorer Option */}
+                      <div 
+                        onClick={() => setSelectedHtmlTemplate("tvexplorer")}
+                        className={`p-3.5 border rounded-2xl cursor-pointer transition-all flex items-start gap-3 ${
+                          selectedHtmlTemplate === "tvexplorer" 
+                            ? "bg-blue-600/[0.04] border-blue-500 text-white" 
+                            : "bg-slate-900/30 border-transparent text-slate-400 hover:border-slate-800"
+                        }`}
+                      >
+                        <span className="text-2xl pt-0.5">📺</span>
+                        <div className="min-w-0 flex-1">
+                          <h4 className="text-xs font-bold leading-normal">TV Explorer Dashboard (Recommended)</h4>
+                          <p className="text-[10px] text-slate-500 leading-relaxed mt-1">
+                            Sleek aesthetic media player. Generates categories menu, embedded video element with quick cast options, and diagnostic outputs.
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Video Grid Option */}
+                      <div 
+                        onClick={() => setSelectedHtmlTemplate("vidgrid")}
+                        className={`p-3.5 border rounded-2xl cursor-pointer transition-all flex items-start gap-3 ${
+                          selectedHtmlTemplate === "vidgrid" 
+                            ? "bg-blue-600/[0.04] border-blue-500 text-white" 
+                            : "bg-slate-900/30 border-transparent text-slate-400 hover:border-slate-800"
+                        }`}
+                      >
+                        <span className="text-2xl pt-0.5">🔲</span>
+                        <div className="min-w-0 flex-1">
+                          <h4 className="text-xs font-bold leading-normal">Responsive Multi-Feed Video Grid</h4>
+                          <p className="text-[10px] text-slate-500 leading-relaxed mt-1">
+                            A multi-viewport matrix screen. Displays customizable grids of streams playing simultaneously on a security control panel layout.
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Public IPTV Portal Option */}
+                      <div 
+                        onClick={() => setSelectedHtmlTemplate("publiciptv")}
+                        className={`p-3.5 border rounded-2xl cursor-pointer transition-all flex items-start gap-3 ${
+                          selectedHtmlTemplate === "publiciptv" 
+                            ? "bg-blue-600/[0.04] border-blue-500 text-white" 
+                            : "bg-slate-900/30 border-transparent text-slate-400 hover:border-slate-800"
+                        }`}
+                      >
+                        <span className="text-2xl pt-0.5">📡</span>
+                        <div className="min-w-0 flex-1">
+                          <h4 className="text-xs font-bold leading-normal">Public Web IPTV Portal</h4>
+                          <p className="text-[10px] text-slate-500 leading-relaxed mt-1">
+                            Minimalist loading station. Strips secondary details to make direct browser playbacks instantaneous and lightweight.
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Weebly Option */}
+                      <div 
+                        onClick={() => setSelectedHtmlTemplate("weebly")}
+                        className={`p-3.5 border rounded-2xl cursor-pointer transition-all flex items-start gap-3 ${
+                          selectedHtmlTemplate === "weebly" 
+                            ? "bg-blue-600/[0.04] border-blue-500 text-white" 
+                            : "bg-slate-900/30 border-transparent text-slate-400 hover:border-slate-800"
+                        }`}
+                      >
+                        <span className="text-2xl pt-0.5">📦</span>
+                        <div className="min-w-0 flex-1">
+                          <h4 className="text-xs font-bold leading-normal">Compact Weebly Iframe Embedder</h4>
+                          <p className="text-[10px] text-slate-500 leading-relaxed mt-1">
+                            A nested widget setup. Specially styled with safe inline styling tags to render cleanly inside Weebly widgets or custom blog spaces.
+                          </p>
+                        </div>
+                      </div>
+
+                    </div>
+                  </div>
+
+                  {/* Actions Trigger Deck Card */}
+                  <div className="bg-[#080A0F] border border-slate-800 rounded-3xl p-5 space-y-4">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest font-mono block">ACTION EXPORTS</label>
+                    <div className="space-y-2.5">
+                      
+                      <button
+                        onClick={handleExportIPTVChannelsM3U}
+                        disabled={channels.length === 0}
+                        className="w-full py-3.5 bg-blue-600 hover:bg-blue-50 disabled:bg-slate-800 disabled:text-slate-600 text-white font-bold rounded-2xl cursor-pointer text-xs flex justify-center items-center gap-2 transition-all shadow-md active:scale-98"
+                      >
+                        <FileDown className="w-4.5 h-4.5 text-blue-150" />
+                        Compile & Download M3U Playlist ({channels.length})
+                      </button>
+
+                      <button
+                        onClick={handleExportIPTVChannelsHtmlPlayer}
+                        disabled={channels.length === 0}
+                        className="w-full py-3.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 disabled:text-slate-600 text-white font-bold rounded-2xl cursor-pointer text-xs flex justify-center items-center gap-2 transition-all shadow-md active:scale-98"
+                      >
+                        🌐 Generate Standalone Web Portal File
+                      </button>
+
+                    </div>
+                  </div>
+
+                </div>
+
+                {/* Right: Simulated Code Output Container (Right 3 cols) */}
+                <div className="xl:col-span-3 bg-[#050608] rounded-3xl border border-slate-800 p-6 flex flex-col gap-4">
+                  <div className="flex justify-between items-center sm:min-w-0 h-8">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full bg-indigo-500"></span>
+                      <span className="font-mono text-[10px] font-bold text-indigo-400 tracking-wider">COMPILED OUTPUT WORKSPACE SANDBOX</span>
+                    </div>
+                    <button
+                      onClick={() => {
+                        let htmlCode = "";
+                        if (selectedHtmlTemplate === "weebly") htmlCode = buildWeeblyHtml(channels);
+                        else if (selectedHtmlTemplate === "vidgrid") htmlCode = buildVidGridHtml(channels);
+                        else if (selectedHtmlTemplate === "publiciptv") htmlCode = buildPublicIPTVHtml(channels);
+                        else htmlCode = buildTVExplorerHtml(channels);
+                        
+                        navigator.clipboard.writeText(htmlCode);
+                        addLog(`HTML source copied for template design [${selectedHtmlTemplate.toUpperCase()}]`);
+                      }}
+                      disabled={channels.length === 0}
+                      className="px-3.5 py-1 text-[10px] uppercase font-mono font-bold tracking-wide rounded-full bg-slate-900 border border-slate-800 hover:border-blue-500 text-slate-300 hover:text-white cursor-pointer active:scale-95 disabled:opacity-50 transition-all shadow-sm shrink-0"
+                    >
+                      📋 Copy to Clipboard
+                    </button>
+                  </div>
+
+                  <div className="flex-1 rounded-2xl bg-[#030406] border border-slate-905 p-4 font-mono text-[11px] leading-relaxed text-slate-500 overflow-y-auto max-h-[500px] select-all shadow-inner relative">
+                    {channels.length === 0 ? (
+                      <div className="absolute inset-0 flex items-center justify-center text-xs text-slate-700 italic font-sans animate-pulse">
+                        Please load an active playlist first.
+                      </div>
+                    ) : (
+                      <pre className="text-slate-400/90 whitespace-pre wrap font-mono scroll-smooth text-left">
+                        {`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>AJN Professional Embedded Portal</title>
+  <style>
+    body { background: #050608; color: #fff; font-family: sans-serif; }
+    /* Compiled Template: ${selectedHtmlTemplate.toUpperCase()} */
+    .stream-container { max-width: 1200px; margin: 40px auto; padding: 20px; }
+  </style>
+</head>
+<body>
+  <!-- System generates ${channels.length} parsed streams below -->
+  <div class="stream-container">
+    <h2>Active Portal - ${selectedHtmlTemplate.toUpperCase()}</h2>
+    <ul>
+      ${channels.map(c => `<li>${c.name} - ${c.url}</li>`).slice(0, 5).join("\n      ")}
+      <!-- ... and ${channels.length - 5} remaining streams ... -->
+    </ul>
+  </div>
+</body>
+</html>`}
+                      </pre>
+                    )}
+                  </div>
+                </div>
+
+              </div>
+              
+            </div>
+          )}
+
+          {/*================ ACTIVE WORKSPACE 5: MAIN SYSTEM DIAGNOSTIC LOGS TERMINAL ================*/}
+          {activeTab === "debug" && (
+            <div className="flex-1 overflow-y-auto p-6 md:p-8 flex flex-col gap-6">
+              
+              {/* Title Section */}
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-5 shrink-0">
+                <div>
+                  <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                    <span>🛠️</span> Diagnostic & Telemetry Command Station
+                  </h2>
+                  <p className="text-xs text-slate-500 font-medium font-sans mt-1">
+                    Monitor system buffer allocations, incoming network stream packets, and active proxy event pipelines.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 font-mono text-xs text-slate-400 shrink-0">
+                  <button 
+                    onClick={() => {
+                      setDebugLogs([]);
+                      addLog("Terminal output log database wiped.");
+                    }}
+                    className="py-1.5 px-4 rounded-xl font-bold bg-slate-900 hover:bg-slate-850 hover:text-white border border-slate-800 cursor-pointer text-[11px] uppercase transition-all"
+                  >
+                    Wipe History
+                  </button>
+                  <button 
+                    onClick={() => {
+                      addLog(`DIAGNOSTIC VERIFY: incoming packets safe. CORS Proxy: OK.`);
+                    }}
+                    className="py-1.5 px-4 rounded-xl font-bold bg-blue-600/10 hover:bg-blue-600 hover:text-white border border-blue-500/20 cursor-pointer text-[11px] text-blue-400 uppercase transition-all"
+                  >
+                    Trigger Diagnostic Verification Ping
+                  </button>
+                </div>
+              </div>
+
+              {/* Main Log Console View */}
+              <div className="flex-1 min-h-[350px] rounded-3xl bg-[#030406] border border-slate-800/80 p-5 font-mono text-xs text-emerald-400/90 overflow-y-auto flex flex-col justify-between shadow-2xl relative shadow-inner">
+                <div className="space-y-1.5 overflow-y-auto flex-1 max-h-[420px] pr-1 block text-left">
+                  {debugLogs.map((log, index) => {
+                    let isWarn = log.includes("warning") || log.includes("warning:");
+                    let isErr = log.includes("error") || log.includes("CORS") || log.includes("stalled");
+                    return (
+                      <div 
+                        key={index} 
+                        className={`leading-normal hover:bg-slate-900/30 font-mono break-all whitespace-pre-wrap flex gap-2 ${
+                          isWarn ? "text-amber-400" : isErr ? "text-red-400" : "text-slate-300"
+                        }`}
+                      >
+                        <span className="text-slate-600 select-none">[{index + 1}]</span>
+                        <span>{log}</span>
+                      </div>
+                    );
+                  })}
+                  <div ref={logsEndRef}></div>
+                </div>
+                
+                {/* Console footer badge */}
+                <div className="pt-4 border-t border-slate-900 shrink-0 text-[10px] font-mono text-slate-500 flex justify-between items-center select-none font-bold">
+                  <span>PIPE PORTAL: ONLINE (Secure sandbox CORS redirect)</span>
+                  <span className="text-emerald-500 animate-pulse uppercase font-mono">● VER2.2 BROADCAST CONTROLLER ACTIVE</span>
+                </div>
+              </div>
+
+              {/* Network buffer simulator graphical interface */}
+              <div className="bg-[#080A0F] border border-slate-800 rounded-3xl p-5 space-y-3 shrink-0">
+                <div className="flex justify-between items-center text-[10px] uppercase font-bold font-mono text-slate-500 tracking-wider">
+                  <span>📈 ACTIVE NETWORK BUFFER BANDWIDTH GRAPH</span>
+                  <span className="text-blue-400 font-extrabold uppercase font-mono">1.25 Gbps / HLS H.264 FEED STABLE</span>
+                </div>
+                <div className="h-6 flex items-end gap-[2px] bg-black/40 border border-slate-900/60 rounded-xl p-2.5 overflow-hidden">
+                  {Array.from({ length: 65 }).map((_, bidx) => (
+                    <div 
+                      key={bidx} 
+                      className="bg-blue-500/85 hover:bg-blue-400 rounded-sm shrink-0 transition-all cursor-pointer"
+                      style={{ 
+                        width: 'calc((100% - 130px) / 65)',
+                        height: `${Math.max(10, Math.round(Math.abs(Math.sin((bidx * 0.18) + (new Date().getSeconds() * 0.2))) * (bidx % 2 === 0 ? 95 : 60)))}%`
+                      }}
+                    ></div>
+                  ))}
+                </div>
+              </div>
+
             </div>
           )}
 

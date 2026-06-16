@@ -9,108 +9,268 @@ export interface ExportEpisode {
   duration?: number | null;
   groupTitle?: string | null;
   tvgLogo?: string | null;
+  tvgId?: string | null;
+  tvgName?: string | null;
+  tvgChno?: string | null;
+  tvgLanguage?: string | null;
+  tvgCountry?: string | null;
+  tvgGenre?: string | null;
+  userAgent?: string | null;
+  referer?: string | null;
+  catchup?: string | null;
+  catchupDays?: number | null;
+  resolution?: string | null;
+  bitrate?: string | null;
+  codec?: string | null;
 }
 
-// ── Language Classifier Helper ───────────────────────────────────────────────
+// ── Language Classifier Map & Helper Data ────────────────────────────────────
 
-export function detectLanguage(title: string, groupTitle = ""): { code: string; name: string } {
+const ISOLangMap: Record<string, string> = {
+  en: "English",
+  es: "Spanish",
+  fr: "French",
+  de: "German",
+  it: "Italian",
+  pt: "Portuguese",
+  ru: "Russian",
+  zh: "Chinese",
+  ja: "Japanese",
+  ko: "Korean",
+  ar: "Arabic",
+  hi: "Hindi",
+  pl: "Polish",
+  tr: "Turkish",
+  ua: "Ukrainian",
+  uk: "Ukrainian",
+  nl: "Dutch",
+  gr: "Greek",
+  el: "Greek",
+  vi: "Vietnamese",
+  id: "Indonesian",
+  cs: "Czech",
+  ro: "Romanian",
+  sv: "Swedish",
+  da: "Danish",
+  fi: "Finnish",
+  no: "Norwegian",
+  he: "Hebrew",
+  th: "Thai"
+};
+
+const countryToLang: Record<string, string> = {
+  US: "en", GB: "en", AU: "en", CA: "en", NZ: "en",
+  MX: "es", CO: "es", AR: "es", CL: "es", PE: "es", VE: "es", ES: "es",
+  BR: "pt", PT: "pt",
+  FR: "fr", BE: "fr",
+  DE: "de", AT: "de", CH: "de",
+  IT: "it",
+  RU: "ru",
+  CN: "zh", TW: "zh", HK: "zh",
+  JP: "ja",
+  KR: "ko",
+  IN: "hi"
+};
+
+/**
+ * Derives a Latin display name from the URL filename when the channel title is entirely Cyrillic.
+ * The URL is never altered.
+ * 
+ * @example
+ * sanitizeCyrillicTitle(
+ *   "Канал 1",
+ *   "https://archive.org/download/01-tv-fighting-crime/01%20TV%20FIGHTING%20CRIME.mp4"
+ * )
+ * // → "01 Tv Fighting Crime"
+ * 
+ * @example
+ * sanitizeCyrillicTitle(
+ *   "Канал 2",
+ *   "https://archive.org/download/01-tv-fighting-crime/COLUMBO.S01E01-Perscription%20Murder.mp4"
+ * )
+ * // → "Columbo S01e01 Perscription Murder"
+ * 
+ * @example
+ * sanitizeCyrillicTitle(
+ *   "BBC News",
+ *   "https://example.com/stream.m3u8"
+ * )
+ * // → "BBC News" (not Cyrillic, returned unchanged)
+ */
+export function sanitizeCyrillicTitle(
+  title: string,
+  url: string,
+  fallback?: string
+): string {
+  const trimmed = title.trim();
+  const isCyrillic = /^[\u0400-\u04FF\s\d\-–—,:!?\.«»]+$/.test(trimmed);
+  if (!isCyrillic) {
+    return title;
+  }
+
+  try {
+    const lastSlashIdx = url.lastIndexOf("/");
+    let segment = lastSlashIdx !== -1 ? url.substring(lastSlashIdx + 1) : url;
+    
+    try {
+      segment = decodeURIComponent(segment);
+    } catch (_) {
+      // Ignore URL encoding errors, use raw segment
+    }
+
+    // Strip common extensions
+    segment = segment.replace(/\.(mp4|m3u8|mkv|ts|mp3|avi|mov|wmv|flv|webm|m3u)$/i, "");
+
+    // Process delimiters
+    let clean = segment.replace(/[-_.]/g, " ");
+
+    // Collapse multiple spaces
+    clean = clean.trim().replace(/\s+/g, " ");
+
+    // Title case formatting
+    const titleCased = clean
+      .split(" ")
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(" ");
+
+    if (titleCased && /[a-zA-Z]/.test(titleCased)) {
+      return titleCased;
+    }
+  } catch (err) {
+    // Fail-safe fallback logic
+  }
+
+  if (fallback !== undefined) {
+    return fallback;
+  }
+
+  return title;
+}
+
+export function detectLanguage(
+  title: string,
+  groupTitle = "",
+  tvgLanguage?: string,
+  tvgCountry?: string
+): { code: string; name: string; source: "attribute" | "heuristic" | "default" } {
+  // 1. ATTRIBUTE-FIRST DECK
+  if (tvgLanguage && tvgLanguage.trim()) {
+    const norm = tvgLanguage.trim().toLowerCase();
+    const mapped = ISOLangMap[norm];
+    if (mapped) {
+      return { code: norm === "uk" ? "ua" : norm, name: mapped, source: "attribute" };
+    } else {
+      const fallbackName = norm.charAt(0).toUpperCase() + norm.slice(1);
+      return { code: norm, name: fallbackName, source: "attribute" };
+    }
+  }
+
   const text = `${title} ${groupTitle}`.toLowerCase();
 
-  // Spanish detection patterns: ESP, ES, Spanish, Español, Latino, etc.
-  if (
-    /\b(esp|es|spa|spanish|español|espanol|latino|univision|sudamerica|telemundo|mexico|colombia|argentina|chile|peru|venezuela|madrid|espana|españa)\b/i.test(text) ||
-    /\[es\]|\[esp\]|\(es\)|\(esp\)|es:|esp:/i.test(text)
-  ) {
-    return { code: "es", name: "Spanish" };
+  // Helper inside detectLanguage for checking safe bracket / prefix contexts of standard codes
+  const testSafeContext = (cd: string): boolean => {
+    const rxBracket = new RegExp(`[\\[\\(]${cd}[\\]\\)]`, "i");
+    const rxColon = new RegExp(`\\b${cd}:`, "i");
+    return rxBracket.test(text) || rxColon.test(text);
+  };
+
+  // 2. CYRILLIC DISAMBIGUATION FIRST
+  if (/[\u0400-\u04FF]/.test(text)) {
+    if (/[\u0456\u0457\u0454\u0491\u0490]/i.test(text)) {
+      return { code: "uk", name: "Ukrainian", source: "heuristic" };
+    }
+    return { code: "ru", name: "Russian", source: "heuristic" };
   }
 
-  // Russian detection patterns: RUS, RU, Russian, Русский, etc., or Cyrillic characters
-  if (
-    /\b(rus|ru|russian|русский|новости|россия|тв|russia)\b/i.test(text) ||
-    /\[ru\]|\[rus\]|\(ru\)|\(rus\)|ru:|rus:/i.test(text) ||
-    /[\u0400-\u04FF]/.test(text) // Cyrillic character set
-  ) {
-    return { code: "ru", name: "Russian" };
+  // 3. SHORT-CODE FALSE POSITIVE HARDENING & HEURISTICS
+  // Spanish
+  const isSpanishLong = /\b(esp|spa|spanish|español|espanol|latino|univision|sudamerica|telemundo|mexico|colombia|argentina|chile|peru|venezuela|madrid|espana|españa)\b/i.test(text);
+  if (isSpanishLong || testSafeContext("es") || testSafeContext("esp")) {
+    return { code: "es", name: "Spanish", source: "heuristic" };
   }
 
-  // Other languages detection
+  // Russian non-Cyrillic metadata keywords
+  const isRussianLong = /\b(rus|russian|русский|новости|россия|тв|russia)\b/i.test(text);
+  if (isRussianLong || testSafeContext("ru") || testSafeContext("rus")) {
+    return { code: "ru", name: "Russian", source: "heuristic" };
+  }
+
   // French
-  if (
-    /\b(fr|fra|french|français|francais|paris|belgique|belgium|canada-fr)\b/i.test(text) ||
-    /\[fr\]|\[fra\]|\(fr\)|\(fra\)|fr:|fra:/i.test(text)
-  ) {
-    return { code: "fr", name: "French" };
+  const isFrenchLong = /\b(fra|french|français|francais|paris|belgique|belgium|canada-fr)\b/i.test(text);
+  if (isFrenchLong || testSafeContext("fr") || testSafeContext("fra")) {
+    return { code: "fr", name: "French", source: "heuristic" };
   }
+
   // German
-  if (
-    /\b(de|deu|ger|german|deutsch|deutschland|austria|vienna|swiss|schweiz)\b/i.test(text) ||
-    /\[de\]|\[ger\]|\(de\)|\(ger\)|de:|ger:/i.test(text)
-  ) {
-    return { code: "de", name: "German" };
+  const isGermanLong = /\b(deu|ger|german|deutsch|deutschland|austria|vienna|swiss|schweiz)\b/i.test(text);
+  if (isGermanLong || testSafeContext("de") || testSafeContext("ger") || testSafeContext("deu")) {
+    return { code: "de", name: "German", source: "heuristic" };
   }
+
   // Italian
-  if (
-    /\b(it|ita|italian|italiano|italia|italy|rome)\b/i.test(text) ||
-    /\[it\]|\[ita\]|\(it\)|\(ita\)|it:|ita:/i.test(text)
-  ) {
-    return { code: "it", name: "Italian" };
+  const isItalianLong = /\b(ita|italian|italiano|italia|italy|rome)\b/i.test(text);
+  if (isItalianLong || testSafeContext("it") || testSafeContext("ita")) {
+    return { code: "it", name: "Italian", source: "heuristic" };
   }
+
   // Portuguese
-  if (
-    /\b(pt|por|portuguese|português|portugues|brasil|brazil|lisbon|portugal)\b/i.test(text) ||
-    /\[pt\]|\[por\]|\(pt\)|\(por\)|pt:|por:/i.test(text)
-  ) {
-    return { code: "pt", name: "Portuguese" };
+  const isPortugueseLong = /\b(por|portuguese|português|portugues|brasil|brazil|lisbon|portugal)\b/i.test(text);
+  if (isPortugueseLong || testSafeContext("pt") || testSafeContext("por")) {
+    return { code: "pt", name: "Portuguese", source: "heuristic" };
   }
+
   // Arabic
-  if (
-    /\b(ar|ara|arabic|arabi|news-ar|الجزيرة|العربية|مصر|دبي|لبنان|سعودية)\b/i.test(text) ||
-    /[\u0600-\u06FF]/.test(text) ||
-    /\[ar\]|\[ara\]|\(ar\)|\(ara\)|ar:|ara:/i.test(text)
-  ) {
-    return { code: "ar", name: "Arabic" };
+  const isArabicLong = /\b(ara|arabic|arabi|news-ar|الجزيرة|العربية|مصر|دبي|لبنان|سعودية)\b/i.test(text) || /[\u0600-\u06FF]/.test(text);
+  if (isArabicLong || testSafeContext("ar") || testSafeContext("ara")) {
+    return { code: "ar", name: "Arabic", source: "heuristic" };
   }
+
   // Chinese
-  if (
-    /\b(zh|chn|chi|chinese|china|cctv|cgtn|taiwan|hongkong|中文|北京|上海)\b/i.test(text) ||
-    /[\u4e00-\u9fa5]/.test(text) ||
-    /\[zh\]|\[chn\]|\(zh\)|\(chn\)|zh:|chn:/i.test(text)
-  ) {
-    return { code: "zh", name: "Chinese" };
+  const isChineseLong = /\b(chn|chi|chinese|china|cctv|cgtn|taiwan|hongkong|中文|北京|上海)\b/i.test(text) || /[\u4e00-\u9fa5]/.test(text);
+  if (isChineseLong || testSafeContext("zh") || testSafeContext("chn") || testSafeContext("chi")) {
+    return { code: "zh", name: "Chinese", source: "heuristic" };
   }
+
   // Japanese
-  if (
-    /\b(ja|jpn|japanese|tokyo|nhk|日本語|日本)\b/i.test(text) ||
-    /[\u3040-\u309F\u30A0-\u30FF]/.test(text) ||
-    /\[ja\]|\[jpn\]|\(ja\)|\(jpn\)|ja:|jpn:/i.test(text)
-  ) {
-    return { code: "ja", name: "Japanese" };
+  const isJapaneseLong = /\b(ja|jpn|japanese|tokyo|nhk|日本語|日本)\b/i.test(text) || /[\u3040-\u309F\u30A0-\u30FF]/.test(text);
+  if (isJapaneseLong || testSafeContext("ja") || testSafeContext("jpn")) {
+    return { code: "ja", name: "Japanese", source: "heuristic" };
   }
 
   // Common other languages list
   const otherLanguages = [
-    { code: "pl", name: "Polish", patterns: /\b(pl|pol|polish|polski|warsaw)\b/i },
-    { code: "tr", name: "Turkish", patterns: /\b(tr|tur|turkish|türkçe|turkiye|istanbul)\b/i },
-    { code: "ua", name: "Ukrainian", patterns: /\b(ua|ukr|ukrainian|україна|київ)\b/i },
-    { code: "nl", name: "Dutch", patterns: /\b(nl|nld|dutch|nederlands|amsterdam)\b/i },
-    { code: "gr", name: "Greek", patterns: /\b(gr|gre|greek|athens|Ελλάδα|ελληνικά)\b/i },
-    { code: "ko", name: "Korean", patterns: /\b(ko|kor|korean|seoul|한국어|조선)\b/i },
-    { code: "vi", name: "Vietnamese", patterns: /\b(vi|vie|vietnamese|viet|hanoi)\b/i },
-    { code: "hi", name: "Hindi", patterns: /\b(hi|hin|hindi|india|delhi|हिंदी)\b/i },
-    { code: "id", name: "Indonesian", patterns: /\b(id|ind|indonesian|jakarta)\b/i },
-    { code: "cs", name: "Czech", patterns: /\b(cs|cze|czech|praha|prague)\b/i },
-    { code: "ro", name: "Romanian", patterns: /\b(ro|ron|romanian|bucuresti|romania)\b/i },
-    { code: "sv", name: "Swedish", patterns: /\b(sv|swe|swedish|stockholm|sverige)\b/i },
+    { code: "pl", name: "Polish", patterns: /\b(pol|polish|polski|warsaw)\b/i, short: "pl" },
+    { code: "tr", name: "Turkish", patterns: /\b(tur|turkish|türkçe|turkiye|istanbul)\b/i, short: "tr" },
+    { code: "ua", name: "Ukrainian", patterns: /\b(ukr|ukrainian|україна|київ)\b/i, short: "ua" },
+    { code: "nl", name: "Dutch", patterns: /\b(nld|dutch|nederlands|amsterdam)\b/i, short: "nl" },
+    { code: "gr", name: "Greek", patterns: /\b(gre|greek|athens|Ελλάδα|ελληνικά)\b/i, short: "gr" },
+    { code: "ko", name: "Korean", patterns: /\b(kor|korean|seoul|한국어|조선)\b/i, short: "ko" },
+    { code: "vi", name: "Vietnamese", patterns: /\b(vie|vietnamese|viet|hanoi)\b/i, short: "vi" },
+    { code: "hi", name: "Hindi", patterns: /\b(hin|hindi|india|delhi|हिंदी)\b/i, short: "hi" },
+    { code: "id", name: "Indonesian", patterns: /\b(id|ind|indonesian|jakarta)\b/i, short: "id" },
+    { code: "cs", name: "Czech", patterns: /\b(cze|czech|praha|prague)\b/i, short: "cs" },
+    { code: "ro", name: "Romanian", patterns: /\b(ron|romanian|bucuresti|romania)\b/i, short: "ro" },
+    { code: "sv", name: "Swedish", patterns: /\b(swe|swedish|stockholm|sverige)\b/i, short: "sv" },
   ];
 
   for (const lang of otherLanguages) {
-    if (lang.patterns.test(text)) {
-      return { code: lang.code, name: lang.name };
+    if (lang.patterns.test(text) || testSafeContext(lang.short)) {
+      return { code: lang.code, name: lang.name, source: "heuristic" };
     }
   }
 
-  // DEFAULT is English
-  return { code: "en", name: "English" };
+  // 4. COUNTRY HINT AS TIEBREAKER
+  if (tvgCountry && tvgCountry.trim()) {
+    const normCountry = tvgCountry.trim().toUpperCase();
+    const heurLang = countryToLang[normCountry];
+    if (heurLang) {
+      const mappedName = ISOLangMap[heurLang] || "English";
+      return { code: heurLang, name: mappedName, source: "heuristic" };
+    }
+  }
+
+  // 5. DEFAULT FALLBACK English
+  return { code: "en", name: "English", source: "default" };
 }
 
 // ── Standard M3U builder ───────────────────────────────────────────────────────
@@ -124,12 +284,42 @@ export function buildM3U(
   for (const ep of episodes) {
     const url = (ep.url ?? "").trim();
     if (!url) continue;
-    const dur   = ep.duration && ep.duration > 0 ? Math.floor(ep.duration) : -1;
-    const title = (ep.title ?? "").replace(/,/g, " ");
-    const logo  = ep.tvgLogo   ? ` tvg-logo="${ep.tvgLogo}"`       : "";
-    const group = ep.groupTitle ? ` group-title="${ep.groupTitle}"` : "";
-    const displayTitle = ajnPrefix ? `🎬 AJN - ${title}` : title;
-    lines.push(`#EXTINF:${dur}${logo}${group},${displayTitle}`);
+
+    let dur = -1;
+    if (ep.duration !== undefined && ep.duration !== null && !isNaN(ep.duration)) {
+      dur = Math.floor(ep.duration);
+    }
+
+    const attrs: string[] = [];
+    if (ep.tvgId) attrs.push(`tvg-id="${ep.tvgId}"`);
+    
+    const tvgNameVal = ep.tvgName ?? ep.title ?? "";
+    if (tvgNameVal) attrs.push(`tvg-name="${tvgNameVal}"`);
+    
+    if (ep.tvgLogo) attrs.push(`tvg-logo="${ep.tvgLogo}"`);
+    if (ep.tvgChno) attrs.push(`tvg-chno="${ep.tvgChno}"`);
+    if (ep.tvgLanguage) attrs.push(`tvg-language="${ep.tvgLanguage}"`);
+    if (ep.tvgCountry) attrs.push(`tvg-country="${ep.tvgCountry}"`);
+    if (ep.tvgGenre) attrs.push(`tvg-genre="${ep.tvgGenre}"`);
+    if (ep.groupTitle) attrs.push(`group-title="${ep.groupTitle}"`);
+    if (ep.catchup) attrs.push(`catchup="${ep.catchup}"`);
+    if (ep.catchupDays !== undefined && ep.catchupDays !== null) attrs.push(`catchup-days="${ep.catchupDays}"`);
+    if (ep.resolution) attrs.push(`resolution="${ep.resolution}"`);
+    if (ep.bitrate) attrs.push(`bitrate="${ep.bitrate}"`);
+    if (ep.codec) attrs.push(`codec="${ep.codec}"`);
+
+    const attrString = attrs.join(" ");
+    const titleVal = ep.title ?? "";
+    const displayTitle = ajnPrefix ? `🎬 AJN - ${titleVal}` : titleVal;
+
+    lines.push(`#EXTINF:${dur} ${attrString},${displayTitle}`);
+
+    if (ep.userAgent) {
+      lines.push(`#EXTVLCOPT:http-user-agent=${ep.userAgent}`);
+    }
+    if (ep.referer) {
+      lines.push(`#EXTVLCOPT:http-referrer=${ep.referer}`);
+    }
     lines.push(url);
   }
   return lines.join("\n");
@@ -137,52 +327,163 @@ export function buildM3U(
 
 // ── Language-Separated M3U builder ────────────────────────────────────────────
 
-export function buildLanguageSeparatedM3U(episodes: ExportEpisode[], playlistTitle = "AJN Language Playlist"): string {
-  // First, group episodes by language
-  const groups: Record<string, { name: string; items: ExportEpisode[] }> = {};
-  
-  for (const ep of episodes) {
-    const url = (ep.url ?? "").trim();
-    if (!url) continue;
-    
-    const title = ep.title ?? "Unnamed Segment";
-    const groupTitle = ep.groupTitle ?? "";
-    const { code, name } = detectLanguage(title, groupTitle);
-    
-    if (!groups[code]) {
-      groups[code] = { name, items: [] };
+export function buildLanguageSeparatedM3U(
+  episodes: ExportEpisode[],
+  playlistTitle = "AJN Language Playlist",
+  options: {
+    splitByCountry?: boolean;
+    splitByGenre?: boolean;
+    scrubCyrillicTitles?: boolean;
+    excludeLanguages?: string[];
+  } = {}
+): string {
+  // 1. CYRILLIC SCRUB (default ON)
+  const processedEpisodes = episodes.map((ep) => {
+    let title = ep.title ?? "";
+    if (options.scrubCyrillicTitles !== false) {
+      title = sanitizeCyrillicTitle(title, ep.url ?? "", title);
     }
-    groups[code].items.push(ep);
+    return {
+      ...ep,
+      title,
+    };
+  });
+
+  // 2. EXCLUSION FILTER & INITIAL GROUPING
+  interface GroupedBucket {
+    langCode: string;
+    langName: string;
+    countryCode: string;
+    genre: string;
+    items: ExportEpisode[];
   }
 
-  // Prescribed order: English first (default), Spanish second, Russian third,
-  // and other languages sorted alphabetically by their language name thereafter.
-  const mainKeys = ["en", "es", "ru"];
-  const otherKeys = Object.keys(groups)
-    .filter(k => !mainKeys.includes(k))
-    .sort((a, b) => groups[a].name.localeCompare(groups[b].name));
+  const buckets: GroupedBucket[] = [];
 
-  const orderedKeys = [...mainKeys.filter(k => groups[k]), ...otherKeys];
+  for (const ep of processedEpisodes) {
+    const url = (ep.url ?? "").trim();
+    if (!url) continue;
 
-  const lines = [`#EXTM3U x-tvg-name="${playlistTitle}"`];
+    const title = ep.title ?? "Unnamed Segment";
+    const groupTitle = ep.groupTitle ?? "";
+    const langInfo = detectLanguage(title, groupTitle, ep.tvgLanguage ?? undefined, ep.tvgCountry ?? undefined);
+    
+    if (options.excludeLanguages && options.excludeLanguages.map(l => l.toLowerCase()).includes(langInfo.code.toLowerCase())) {
+      continue;
+    }
 
-  for (const key of orderedKeys) {
-    const langGroup = groups[key];
-    if (!langGroup || langGroup.items.length === 0) continue;
+    const resolvedCountry = (options.splitByCountry && ep.tvgCountry) ? ep.tvgCountry.trim().toUpperCase() : (options.splitByCountry ? "UN" : "");
+    const resolvedGenre = (options.splitByGenre && ep.tvgGenre) ? ep.tvgGenre.trim() : (options.splitByGenre ? "General" : "");
 
-    // Add a divider or section comment in M3U
-    lines.push(`\n# =================================================================`);
-    lines.push(`# LANGUAGE CHANNEL: ${langGroup.name.toUpperCase()} PANEL (${langGroup.items.length} streams)`);
-    lines.push(`# =================================================================`);
+    let bucket = buckets.find(b => 
+      b.langCode === langInfo.code && 
+      b.countryCode === resolvedCountry && 
+      b.genre === resolvedGenre
+    );
 
-    for (const ep of langGroup.items) {
+    if (!bucket) {
+      bucket = {
+        langCode: langInfo.code,
+        langName: langInfo.name,
+        countryCode: resolvedCountry,
+        genre: resolvedGenre,
+        items: []
+      };
+      buckets.push(bucket);
+    }
+    bucket.items.push(ep);
+  }
+
+  // 3. ORDERING HIERARCHY
+  function getLangPriority(code: string): number {
+    if (code === "en") return 1;
+    if (code === "es") return 2;
+    if (code === "fr") return 3;
+    return 999;
+  }
+
+  buckets.sort((a, b) => {
+    const pA = getLangPriority(a.langCode);
+    const pB = getLangPriority(b.langCode);
+    if (pA !== pB) return pA - pB;
+
+    const nameComp = a.langName.localeCompare(b.langName);
+    if (nameComp !== 0) return nameComp;
+
+    if (options.splitByCountry) {
+      const countryComp = a.countryCode.localeCompare(b.countryCode);
+      if (countryComp !== 0) return countryComp;
+    }
+
+    if (options.splitByGenre) {
+      const genreComp = a.genre.localeCompare(b.genre);
+      if (genreComp !== 0) return genreComp;
+    }
+
+    return 0;
+  });
+
+  const uniqueLangsInExport = Array.from(new Set(buckets.map((b) => b.langName))).sort();
+  const totalEpisodesInExport = buckets.reduce((sum, b) => sum + b.items.length, 0);
+
+  // 4. HEADER EMISSION WITH SPECIAL INSTRUCTION COMMENT FIELDS (Step 6-8)
+  const lines = [
+    `#EXTM3U x-tvg-name="${playlistTitle}"`,
+    `# Generated by AJN Professional Player | Language-Separated Export`,
+    `# Languages: ${uniqueLangsInExport.join(", ")}`,
+    `# Total streams: ${totalEpisodesInExport}`
+  ];
+
+  // 5. SERIALIZE GROUPS
+  for (const bucket of buckets) {
+    let groupTitle = bucket.langName;
+    if (options.splitByCountry && options.splitByGenre) {
+      groupTitle = `${bucket.langName} - ${bucket.countryCode} - ${bucket.genre}`;
+    } else if (options.splitByCountry) {
+      groupTitle = `${bucket.langName} - ${bucket.countryCode}`;
+    } else if (options.splitByGenre) {
+      groupTitle = `${bucket.langName} - ${bucket.genre}`;
+    }
+
+    for (const ep of bucket.items) {
       const url = (ep.url ?? "").trim();
-      const dur = ep.duration && ep.duration > 0 ? Math.floor(ep.duration) : 3600;
-      const title = (ep.title ?? "").replace(/,/g, " ");
-      const logo = ep.tvgLogo ? ` tvg-logo="${ep.tvgLogo}"` : "";
       
-      // Embed language as the group-title category
-      lines.push(`#EXTINF:${dur}${logo} group-title="${langGroup.name}",🎬 AJN [${langGroup.name}] - ${title}`);
+      let dur = -1;
+      if (ep.duration !== undefined && ep.duration !== null && !isNaN(ep.duration)) {
+        dur = Math.floor(ep.duration);
+      }
+
+      const attrs: string[] = [];
+      if (ep.tvgId) attrs.push(`tvg-id="${ep.tvgId}"`);
+      
+      const tvgNameVal = ep.tvgName ?? ep.title ?? "";
+      if (tvgNameVal) attrs.push(`tvg-name="${tvgNameVal}"`);
+      
+      if (ep.tvgLogo) attrs.push(`tvg-logo="${ep.tvgLogo}"`);
+      if (ep.tvgChno) attrs.push(`tvg-chno="${ep.tvgChno}"`);
+      if (ep.tvgLanguage) attrs.push(`tvg-language="${ep.tvgLanguage}"`);
+      if (ep.tvgCountry) attrs.push(`tvg-country="${ep.tvgCountry}"`);
+      if (ep.tvgGenre) attrs.push(`tvg-genre="${ep.tvgGenre}"`);
+      
+      attrs.push(`group-title="${groupTitle}"`);
+      
+      if (ep.catchup) attrs.push(`catchup="${ep.catchup}"`);
+      if (ep.catchupDays !== undefined && ep.catchupDays !== null) attrs.push(`catchup-days="${ep.catchupDays}"`);
+      if (ep.resolution) attrs.push(`resolution="${ep.resolution}"`);
+      if (ep.bitrate) attrs.push(`bitrate="${ep.bitrate}"`);
+      if (ep.codec) attrs.push(`codec="${ep.codec}"`);
+
+      const attrString = attrs.join(" ");
+      const displayTitle = ep.title ?? "";
+
+      lines.push(`#EXTINF:${dur} ${attrString},${displayTitle}`);
+
+      if (ep.userAgent) {
+        lines.push(`#EXTVLCOPT:http-user-agent=${ep.userAgent}`);
+      }
+      if (ep.referer) {
+        lines.push(`#EXTVLCOPT:http-referrer=${ep.referer}`);
+      }
       lines.push(url);
     }
   }
@@ -206,6 +507,8 @@ export function buildWeeblyHtml(
       group: (ep.groupTitle ?? "AJN Archive"),
       duration: ep.duration && ep.duration > 0 ? Math.floor(ep.duration) : 3600,
       "tvg-logo": (ep.tvgLogo ?? "https://raw.githubusercontent.com/banamine/AJN-Resource-Hub/main/ajn_logo.png"),
+      userAgent: ep.userAgent || "",
+      referer: ep.referer || ""
     }));
 
   const safeTitle = playlistTitle.replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -712,7 +1015,10 @@ function hydrateCard(index) {
   
   card.classList.remove('placeholder');
   var item = playlist[index];
-  card.innerHTML = '<div class="guide-title">' + item.title + '</div>' + 
+  var badge = (item.userAgent || item.referer) 
+    ? ' <span class="text-amber-500" title="This stream requires custom HTTP headers — may not play in all browsers.">🔑</span>' 
+    : '';
+  card.innerHTML = '<div class="guide-title">' + item.title + badge + '</div>' + 
                    '<div class="guide-time">#' + (index+1) + ' • ' + (item.group || 'AJN Broadcast') + '</div>';
 }
 
@@ -938,6 +1244,8 @@ export function buildTVExplorerHtml(
       url: (ep.url ?? "").trim(),
       group: (ep.groupTitle ?? "General IPTV"),
       logo: (ep.tvgLogo ?? "https://raw.githubusercontent.com/banamine/AJN-Resource-Hub/main/ajn_logo.png"),
+      userAgent: ep.userAgent || "",
+      referer: ep.referer || ""
     }));
 
   const safeTitle = playlistTitle.replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -1152,7 +1460,10 @@ export function buildTVExplorerHtml(
             <img src="\${item.logo}" alt="" class="w-8 h-8 rounded-lg object-contain bg-black/40 border border-slate-800 shrink-0 p-1" onerror="this.src='https://raw.githubusercontent.com/banamine/AJN-Resource-Hub/main/ajn_logo.png'" />
             <div class="min-w-0 flex-1">
               <div class="text-[9px] text-slate-500 font-bold truncate tracking-wider font-mono uppercase">\${item.group}</div>
-              <div class="text-xs font-semibold truncate leading-tight mt-0.5">\${item.title}</div>
+              <div class="text-xs font-semibold truncate leading-tight mt-0.5 flex items-center gap-1">
+                <span>\${item.title}</span>
+                \${(item.userAgent || item.referer) ? \`<span class="text-amber-500" title="This stream requires custom HTTP headers — may not play in all browsers.">🔑</span>\` : ""}
+              </div>
             </div>
             <div class="text-[10px] text-slate-500 font-mono shrink-0">\${index + 1}</div>
           \`;
@@ -1232,7 +1543,7 @@ export function buildTVExplorerHtml(
             }
           }
 
-          hlsInstance = new Hls({
+          const hlsOpts = {
             enableWorker: true,
             lowLatencyMode: true,
             maxBufferLength: maxBufferLength,
@@ -1240,7 +1551,20 @@ export function buildTVExplorerHtml(
             maxBufferSize: maxBufferSizeValue,
             backBufferLength: backBufferLen,
             ...extraSync
-          });
+          };
+
+          if (stream.userAgent || stream.referer) {
+            hlsOpts.xhrSetup = function(xhr, url) {
+              if (stream.userAgent) {
+                xhr.setRequestHeader("User-Agent", stream.userAgent);
+              }
+              if (stream.referer) {
+                console.debug("[AJN] Referer header required but cannot be set client-side:", stream.referer);
+              }
+            };
+          }
+
+          hlsInstance = new Hls(hlsOpts);
           hlsInstance.loadSource(stream.url);
           hlsInstance.attachMedia(player);
           hlsInstance.on(Hls.Events.ERROR, function (event, data) {
@@ -1319,6 +1643,8 @@ export function buildVidGridHtml(
       url: (ep.url ?? "").trim(),
       group: (ep.groupTitle ?? "General IPTV"),
       logo: (ep.tvgLogo ?? "https://raw.githubusercontent.com/banamine/AJN-Resource-Hub/main/ajn_logo.png"),
+      userAgent: ep.userAgent || "",
+      referer: ep.referer || ""
     }));
 
   const safeTitle = playlistTitle.replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -1426,7 +1752,10 @@ export function buildVidGridHtml(
         btn.innerHTML = \`
           <img src="\${item.logo}" class="w-7 h-7 rounded object-contain bg-black/50 border border-slate-800 p-0.5 shrink-0" onerror="this.src='https://raw.githubusercontent.com/banamine/AJN-Resource-Hub/main/ajn_logo.png'" />
           <div class="min-w-0 flex-1">
-            <h4 class="text-[11px] font-semibold text-slate-350 truncate leading-tight group-hover:text-white transition-colors">\${item.title}</h4>
+            <h4 class="text-[11px] font-semibold text-slate-350 truncate leading-tight group-hover:text-white transition-colors flex items-center gap-1">
+              <span>\${item.title}</span>
+              \${(item.userAgent || item.referer) ? \`<span class="text-amber-500" title="This stream requires custom HTTP headers — may not play in all browsers.">🔑</span>\` : ""}
+            </h4>
             <span class="text-[8px] font-bold font-mono text-slate-500">\${item.group}</span>
           </div>
         \`;
@@ -1670,7 +1999,7 @@ export function buildVidGridHtml(
             }
           }
 
-          hlsObj = new Hls({
+          const hlsOpts = {
             enableWorker: true,
             lowLatencyMode: true,
             maxBufferLength: maxBufferLength,
@@ -1678,7 +2007,20 @@ export function buildVidGridHtml(
             maxBufferSize: maxBufferSizeValue,
             backBufferLength: backBufferLen,
             ...extraSync
-          });
+          };
+
+          if (item.userAgent || item.referer) {
+            hlsOpts.xhrSetup = function(xhr, url) {
+              if (item.userAgent) {
+                xhr.setRequestHeader("User-Agent", item.userAgent);
+              }
+              if (item.referer) {
+                console.debug("[AJN] Referer header required but cannot be set client-side:", item.referer);
+              }
+            };
+          }
+
+          hlsObj = new Hls(hlsOpts);
           hlsObj.loadSource(item.url);
           hlsObj.attachMedia(player);
         } else if (player.canPlayType('application/vnd.apple.mpegurl')) {
@@ -1954,7 +2296,7 @@ export function buildPublicIPTVHtml(
             }
           }
 
-          hlsInstance = new Hls({
+          const hlsOpts = {
             enableWorker: true,
             lowLatencyMode: true,
             maxBufferLength: maxBufferLength,
@@ -1962,7 +2304,20 @@ export function buildPublicIPTVHtml(
             maxBufferSize: maxBufferSizeValue,
             backBufferLength: backBufferLen,
             ...extraSync
-          });
+          };
+
+          if (channel.userAgent || channel.referer) {
+            hlsOpts.xhrSetup = function(xhr, url) {
+              if (channel.userAgent) {
+                xhr.setRequestHeader("User-Agent", channel.userAgent);
+              }
+              if (channel.referer) {
+                console.debug("[AJN] Referer header required but cannot be set client-side:", channel.referer);
+              }
+            };
+          }
+
+          hlsInstance = new Hls(hlsOpts);
           hlsInstance.loadSource(channel.url);
           hlsInstance.attachMedia(player);
         } else if (player.canPlayType('application/vnd.apple.mpegurl')) {
