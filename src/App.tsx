@@ -158,14 +158,14 @@ export function HeaderClock() {
 
 export function PlayerInfoBar({ 
   currentTitle, 
-  currentUrl,
-  viewMode,
-  setViewMode 
+  currentUrl = "",
+  viewMode = "standard",
+  setViewMode = () => {}
 }: { 
   currentTitle: string; 
-  currentUrl: string;
-  viewMode: "standard" | "theater";
-  setViewMode: (mode: "standard" | "theater") => void;
+  currentUrl?: string;
+  viewMode?: "standard" | "theater";
+  setViewMode?: (mode: "standard" | "theater") => void;
 }) {
   const [timeStr, setTimeStr] = useState("");
   const [countdown, setCountdown] = useState("00:00");
@@ -3234,11 +3234,16 @@ export default function App() {
                 
                 {/* FLOATING HEADER INFO BAR (Sleek Theme Styling) */}
                 {mainViewerMode === "standard" && currentUrl && (
-                  <PlayerInfoBar currentTitle={currentTitle} />
+                  <PlayerInfoBar 
+                    currentTitle={currentTitle} 
+                    currentUrl={currentUrl}
+                    viewMode={viewMode}
+                    setViewMode={setViewMode}
+                  />
                 )}
  
                 {/* VIDEO GRAPHICS ELEMENT - Styled elegantly like active queue */}
-                <div className="w-full max-w-5xl aspect-video rounded-[32px] overflow-hidden bg-slate-950 border border-slate-800/60 shadow-2xl relative flex items-center justify-center shadow-blue-950/20">
+                <div className={`w-full ${viewMode === "theater" ? "max-w-7xl h-full" : "max-w-5xl"} aspect-video rounded-[32px] overflow-hidden bg-slate-950 border border-slate-800/60 shadow-2xl relative flex items-center justify-center shadow-blue-950/20`}>
                   
                   {mainViewerMode !== "standard" ? (
                     <iframe
