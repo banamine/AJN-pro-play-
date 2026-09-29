@@ -2,9 +2,9 @@ import { useEffect, useRef } from "react";
 import type { TimeProvider } from "../../types/guide";
 import { getTimelineWidth } from "./timeline-geometry";
 
-export interface EpgNowIndicatorProps { windowStartEpoch: number; windowEndEpoch: number; pixelsPerMs: number; timeProvider: TimeProvider; }
+export interface EpgNowIndicatorProps { windowStartEpoch: number; windowEndEpoch: number; pixelsPerMs: number; timeProvider: TimeProvider; channelLabelWidth?: number; }
 
-export function EpgNowIndicator({ windowStartEpoch, windowEndEpoch, pixelsPerMs, timeProvider }: EpgNowIndicatorProps) {
+export function EpgNowIndicator({ windowStartEpoch, windowEndEpoch, pixelsPerMs, timeProvider, channelLabelWidth = 160 }: EpgNowIndicatorProps) {
   const indicatorRef = useRef<HTMLDivElement>(null);
   const startRef = useRef(windowStartEpoch);
   const endRef = useRef(windowEndEpoch);
