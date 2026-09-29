@@ -205,6 +205,37 @@ test("HLS preservation hooks receive the active source and saved position", () =
   assert.equal(video.playCalls, 1);
 });
 
+test("terminal HLS failure tears down the engine before application fallback", () => {
+  const video = createVideo();
+  const harness = createHlsHarness();
+  let fatalSource = null;
+  const controller = new PlaybackController({
+    video,
+    hlsFactory: () => harness.instance,
+    isHlsSupported: () => true,
+    hlsEvents: EVENTS,
+    onFatalError: (source) => {
+      fatalSource = source;
+    },
+  });
+
+  controller.load({ url: "https://a.example/live.m3u8", title: "Live", kind: "hls" });
+  harness.emit(EVENTS.ERROR, { fatal: true, type: "unrecoverable", details: "fatalStreamError" });
+
+  assert.deepEqual(harness.calls, [
+    ["loadSource", "https://a.example/live.m3u8"],
+    ["attachMedia"],
+    ["stopLoad"],
+    ["detachMedia"],
+    ["destroy"],
+  ]);
+  assert.equal(fatalSource.title, "Live");
+  assert.equal(controller.getState().status, "error");
+
+  harness.emit(EVENTS.ERROR, { fatal: true, type: "unrecoverable", details: "staleAfterTeardown" });
+  assert.equal(controller.getState().error, "HLS fatal error: fatalStreamError");
+});
+
 test("unrecoverable HLS errors hand off to the application fallback callback", () => {
   const video = createVideo();
   const harness = createHlsHarness();
