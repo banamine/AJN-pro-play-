@@ -4,6 +4,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type KeyboardEvent,
 } from "react";
 import type { EpgChannelSchedule, TimeProvider } from "../../../types/guide";
 import { EpgChannelRow, type EpgProgramSelectEvent } from "./EpgChannelRow";
@@ -178,7 +179,7 @@ export function EpgContainer({
     windowEndEpoch,
   ]);
 
-  const handleKeyDown = (event: React.KeyboardEvent<HTMLElement>) => {
+  const handleKeyDown = (event: KeyboardEvent<HTMLElement>) => {
     if (!isFocusRegionActive) return;
 
     const directionMap = {
