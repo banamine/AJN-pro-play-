@@ -13,7 +13,7 @@ function formatTick(epoch: number): string {
   return new Date(epoch).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }
 
-export function EpgTimelineHeader({ windowStartEpoch, windowEndEpoch, pixelsPerMs, tickMinutes = 30 }: EpgTimelineHeaderProps) {
+export function EpgTimelineHeader({ windowStartEpoch, windowEndEpoch, pixelsPerMs, tickMinutes = 30, channelLabelWidth = 160 }: EpgTimelineHeaderProps) {
   const window: TimelineWindow = { windowStartEpoch, windowEndEpoch };
   const tickMs = Math.max(1, tickMinutes) * 60_000;
   const firstTick = Math.ceil(windowStartEpoch / tickMs) * tickMs;
