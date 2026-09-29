@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { RumbleIframe } from "../RumbleIframe.tsx";
 
 export interface RumblePlayerContainerProps {
@@ -6,7 +7,7 @@ export interface RumblePlayerContainerProps {
   fallback: boolean;
 }
 
-export function RumblePlayerContainer({
+export const RumblePlayerContainer = memo(function RumblePlayerContainer({
   activeEmbedUrl,
   channelTitle,
   fallback,
@@ -26,4 +27,4 @@ export function RumblePlayerContainer({
       )}
     </section>
   );
-}
+});
