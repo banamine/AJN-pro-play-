@@ -36,6 +36,7 @@ import {
   Share2
 } from "lucide-react";
 import Hls from "hls.js";
+import { teardownHlsInstance } from "./playback/hls-lifecycle.ts";
 import { motion, AnimatePresence } from "motion/react";
 import { IPTVChannel, PlaybackHistoryItem, ArchiveEpisode, ColorScheme } from "./types";
 import { buildM3U, buildWeeblyHtml, triggerClientDownload, buildLanguageSeparatedM3U, detectLanguage, buildTVExplorerHtml, buildVidGridHtml, buildPublicIPTVHtml, ExportEpisode } from "./utils/exportUtils";
@@ -570,8 +571,7 @@ export default function App() {
 
     return () => {
       if (hlsRef.current) {
-        hlsRef.current.detachMedia();
-        hlsRef.current.destroy();
+        teardownHlsInstance(hlsRef.current, videoRef.current);
         hlsRef.current = null;
       }
     };
@@ -1774,9 +1774,8 @@ export default function App() {
     if (!video) return;
 
     if (hlsRef.current) {
-      addLog("Memory Leak Prevention: Detaching legacy media and destroying previous HLS instance", "info");
-      hlsRef.current.detachMedia();
-      hlsRef.current.destroy();
+      addLog("Memory Leak Prevention: Stopping, detaching, and destroying previous HLS instance", "info");
+      teardownHlsInstance(hlsRef.current, video);
       hlsRef.current = null;
     }
 
@@ -1950,8 +1949,7 @@ export default function App() {
               break;
             default:
               addLog(`Unrecoverable fatal HLS error: ${data.details}. Initiating deep direct proxy gateway fallback.`, "error");
-              hls.detachMedia();
-              hls.destroy();
+              teardownHlsInstance(hls, video);
               hlsRef.current = null;
               handlePlayerError(url, titleStr);
               break;

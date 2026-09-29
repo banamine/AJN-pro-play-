@@ -16,4 +16,6 @@ The rebuild starts from the existing application on `main`, but runtime infrastr
 
 ## Next phase
 
-After Phase 0 is green, rebuild the application around clean runtime boundaries while preserving existing media/player capabilities only where they pass explicit verification.
+Phase 1 establishes explicit runtime boundaries before the greenfield UI/player rebuild.
+
+See `docs/PHASE-1-RUNTIME-BOUNDARIES.md` for scope and gates.

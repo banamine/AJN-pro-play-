@@ -1,6 +1,7 @@
 import express from "express";
 import path from "path";
 import { Readable } from "stream";
+import { validateStreamProxyUrl } from "./server/stream-url.ts";
 
 async function startServer() {
   const app = express();
@@ -12,6 +13,14 @@ async function startServer() {
 
   app.set("trust proxy", 1);
   app.use(express.json());
+
+  app.get("/healthz", (_req, res) => {
+    res.status(200).json({ status: "ok" });
+  });
+
+  app.get("/readyz", (_req, res) => {
+    res.status(200).json({ status: "ready" });
+  });
 
   // API Route 1: Parse and serve AJN RSS video archive with zero CORS issues
   app.get("/api/ajn-archive", async (req, res) => {
@@ -107,9 +116,14 @@ async function startServer() {
   });
 
   app.get("/api/stream-proxy", async (req, res) => {
-    const rawUrl = req.query.url as string;
+    const rawUrl = typeof req.query.url === "string" ? req.query.url : undefined;
     if (!rawUrl) {
       return res.status(400).json({ error: "Missing required query parameter: url" });
+    }
+
+    const validated = validateStreamProxyUrl(rawUrl);
+    if (validated.ok === false) {
+      return res.status(400).json({ error: validated.error });
     }
 
     const abortController = new AbortController();
@@ -119,10 +133,9 @@ async function startServer() {
     });
 
     try {
-      const decodedUrl = decodeURIComponent(rawUrl);
-      console.log(`[Stream Proxy] Fetching stream: ${decodedUrl}`);
+      console.log(`[Stream Proxy] Fetching stream: ${validated.url}`);
 
-      const response = await fetch(decodedUrl, {
+      const response = await fetch(validated.url, {
         headers: {
           "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
         },
@@ -149,7 +162,7 @@ async function startServer() {
         return;
       }
       const message = err instanceof Error ? err.message : String(err);
-      console.error(`[Stream Proxy Error] Failed for ${rawUrl}:`, message);
+      console.error(`[Stream Proxy Error] Failed for ${validated.url}:`, message);
       if (!res.headersSent) {
         res.status(502).json({ error: "Stream proxy error", details: message });
       }
