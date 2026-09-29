@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import type { TimeProvider } from "../../types/guide";
+import type { TimeProvider } from "../../../types/guide";
 import { getTimelineWidth } from "./timeline-geometry";
 
 export interface EpgNowIndicatorProps { windowStartEpoch: number; windowEndEpoch: number; pixelsPerMs: number; timeProvider: TimeProvider; channelLabelWidth?: number; }
