@@ -76,3 +76,6 @@ The regression suite covers:
 - redirect-origin rejection
 - bounded response rejection
 - successful gateway projection
+
+
+<!-- CI trigger: union narrowing verified in server route. -->
