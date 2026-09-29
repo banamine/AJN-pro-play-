@@ -1,9 +1,11 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const http = require("node:http");
 
 const {
   isPublicAddress,
   resolvePublicAddresses,
+  openStreamProxy,
 } = require("../dist/test-modules/stream-proxy.cjs");
 
 test("accepts a public IPv4 address", () => {
@@ -37,6 +39,21 @@ test("rejects loopback, ULA, link-local and multicast IPv6", () => {
   ]) {
     assert.equal(isPublicAddress(address, 6), false, address);
   }
+});
+
+test("unwraps IPv4-mapped IPv6 and rechecks the embedded IPv4", () => {
+  assert.equal(isPublicAddress("::ffff:192.168.1.10", 6), false);
+  assert.equal(isPublicAddress("::ffff:93.184.216.34", 6), true);
+});
+
+test("unwraps NAT64 IPv6 and rechecks the embedded IPv4", () => {
+  assert.equal(isPublicAddress("64:ff9b::10.0.0.8", 6), false);
+  assert.equal(isPublicAddress("64:ff9b::93.184.216.34", 6), true);
+});
+
+test("unwraps 6to4 IPv6 and rechecks the embedded IPv4", () => {
+  assert.equal(isPublicAddress("2002:c0a8:0101::1", 6), false);
+  assert.equal(isPublicAddress("2002:5db8:d822::1", 6), true);
 });
 
 test("rejects a public hostname that resolves to a private IPv4 address", async () => {
@@ -75,4 +92,36 @@ test("fails closed when DNS resolution returns no usable address", async () => {
     resolvePublicAddresses("media.example.test", async () => []),
     /Blocked stream host/
   );
+});
+
+test("connects through a real local HTTP server using the validated lookup path", async () => {
+  const server = http.createServer((req, res) => {
+    res.writeHead(200, { "content-type": "video/mp4" });
+    res.end("local-stream-fixture");
+  });
+
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+
+  try {
+    const result = await openStreamProxy(
+      `http://media.example.test:${address.port}/fixture.mp4`,
+      new AbortController().signal,
+      {
+        lookup: async () => [{ address: "127.0.0.1", family: 4 }],
+        isPublicAddress: (candidate, family) =>
+          candidate === "127.0.0.1" && family === 4,
+      }
+    );
+
+    assert.equal(result.ok, true);
+    if (result.ok) {
+      assert.equal(result.statusCode, 200);
+      assert.equal(result.headers["content-type"], "video/mp4");
+      assert.equal((await result.body.toArray()).toString(), "local-stream-fixture");
+    }
+  } finally {
+    await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+  }
 });
