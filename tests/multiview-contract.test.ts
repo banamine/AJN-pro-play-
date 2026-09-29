@@ -1,4 +1,4 @@
-import { applyPattern, calculateTileResourcePolicy, createInitialMultiViewState, moveGridFocus, moveMenuSelection, setAudioFocus } from "../src/multiview/contracts";
+import { applyPattern, createInitialMultiViewState, moveGridFocus, moveMenuSelection, setAudioFocus } from "../src/multiview/contracts";
 import { evaluateAdmission } from "../src/multiview/admission";
 import type { MultiViewPattern, MultiViewSource } from "../types/multiview";
 
