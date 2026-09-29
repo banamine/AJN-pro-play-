@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { EpgChannelSchedule, TimeProvider } from "../../types/guide";
+import type { EpgChannelSchedule, TimeProvider } from "../../../types/guide";
 import { EpgChannelRow, type EpgProgramSelectEvent } from "./EpgChannelRow";
 import { EpgNowIndicator } from "./EpgNowIndicator";
 import { EpgTimelineHeader } from "./EpgTimelineHeader";
@@ -37,4 +37,4 @@ export function EpgContainer({ channels, windowStartEpoch, windowEndEpoch, timeP
 }
 
 export type { EpgProgramSelectEvent } from "./EpgChannelRow";
-export type { EpgChannelSchedule } from "../../types/guide";
+export type { EpgChannelSchedule } from "../../../types/guide";
