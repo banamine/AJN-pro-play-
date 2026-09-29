@@ -1,12 +1,16 @@
 import express from "express";
 import path from "path";
-import { createServer as createViteServer } from "vite";
 import { Readable } from "stream";
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = Number.parseInt(process.env.PORT ?? "3000", 10);
 
+  if (!Number.isInteger(PORT) || PORT < 1 || PORT > 65535) {
+    throw new Error(`Invalid PORT: ${process.env.PORT}`);
+  }
+
+  app.set("trust proxy", 1);
   app.use(express.json());
 
   // API Route 1: Parse and serve AJN RSS video archive with zero CORS issues
@@ -14,12 +18,12 @@ async function startServer() {
     try {
       const RSS_URL = "https://rss.alexjones.media/AJNHourlyVideo.xml";
       console.log(`[Proxy] Fetching AJN RSS feed from: ${RSS_URL}`);
-      
+
       const response = await fetch(RSS_URL, {
         headers: {
           "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         },
-        signal: AbortSignal.timeout(12000) // 12s timeout
+        signal: AbortSignal.timeout(12000)
       });
 
       if (!response.ok) {
@@ -34,35 +38,29 @@ async function startServer() {
       while ((match = itemRegex.exec(xmlText)) !== null) {
         const itemContent = match[1];
 
-        // Extract title
         let title = "";
         const titleMatch = itemContent.match(/<title>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/title>/);
         if (titleMatch) title = titleMatch[1].trim();
 
-        // Extract enclosure URL
         let videoUrl = "";
         const enclosureMatch = itemContent.match(/<enclosure[^>]*url="([^"]+)"/);
         if (enclosureMatch) videoUrl = enclosureMatch[1].trim();
 
-        // Require a video-like file
         if (!videoUrl || (!videoUrl.includes(".m4v") && !videoUrl.includes(".mp4") && !videoUrl.includes(".mp3"))) {
           continue;
         }
 
-        // Extract pubDate
         let pubDateStr = "";
         const pubDateMatch = itemContent.match(/<pubDate>([\s\S]*?)<\/pubDate>/);
         if (pubDateMatch) pubDateStr = pubDateMatch[1].trim();
 
         const pubDate = pubDateStr ? new Date(pubDateStr) : new Date();
 
-        // Date key in YYYY-MM-DD
         const year = pubDate.getFullYear();
         const month = String(pubDate.getMonth() + 1).padStart(2, "0");
         const day = String(pubDate.getDate()).padStart(2, "0");
         const dateKey = `${year}-${month}-${day}`;
 
-        // Category/Show classification
         let show = "Alex Jones Show";
         const titleLower = title.toLowerCase();
         if (titleLower.includes("war room") || titleLower.includes("warroom")) {
@@ -79,17 +77,14 @@ async function startServer() {
           show = "Alex Jones Show";
         }
 
-        // Hour detection
         let hour = "Full Show";
-        const hourMatch = title.match(/Hr\s*(\d)/i) || 
-                          title.match(/Hour\s*(\d)/i) || 
-                          title.match(/Part\s*(\d)/i) || 
+        const hourMatch = title.match(/Hr\s*(\d)/i) ||
+                          title.match(/Hour\s*(\d)/i) ||
+                          title.match(/Part\s*(\d)/i) ||
                           title.match(/p\s*(\d)/i) ||
                           title.match(/-\s*hr\s*(\d)/i) ||
                           title.match(/hr\s*(\d)/i);
-        if (hourMatch) {
-          hour = `Hour ${hourMatch[1]}`;
-        }
+        if (hourMatch) hour = `Hour ${hourMatch[1]}`;
 
         episodes.push({
           id: videoUrl,
@@ -104,13 +99,13 @@ async function startServer() {
 
       console.log(`[Proxy] Successfully parsed ${episodes.length} episodes from AJN RSS`);
       res.json({ success: true, count: episodes.length, episodes });
-    } catch (e: any) {
-      console.error(`[Proxy Error] Failed to process AJN Archive feed:`, e.message);
-      res.status(500).json({ success: false, error: e.message });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      console.error("[Proxy Error] Failed to process AJN Archive feed:", message);
+      res.status(500).json({ success: false, error: message });
     }
   });
 
-  // API Route 2: General Stream CORS Bypasser for live IPTV channels
   app.get("/api/stream-proxy", async (req, res) => {
     const rawUrl = req.query.url as string;
     if (!rawUrl) {
@@ -138,33 +133,32 @@ async function startServer() {
         throw new Error(`Failed to fetch remote stream. Status: ${response.status}`);
       }
 
-      // Copy headers that matter
       const contentType = response.headers.get("content-type");
-      if (contentType) {
-        res.setHeader("Content-Type", contentType);
-      }
+      if (contentType) res.setHeader("Content-Type", contentType);
       res.setHeader("Access-Control-Allow-Origin", "*");
       res.setHeader("Cache-Control", "no-cache");
 
-      // Pass stream body forward with proper backpressure piping
       if (response.body) {
         Readable.fromWeb(response.body as any).pipe(res);
       } else {
         res.status(500).send("No stream body found");
       }
-    } catch (err: any) {
-      if (err.name === "AbortError") {
+    } catch (err) {
+      if (err instanceof Error && err.name === "AbortError") {
         console.log("[Stream Proxy] Connection aborted successfully.");
         return;
       }
-      console.error(`[Stream Proxy Error] Failed for ${rawUrl}:`, err.message);
-      res.status(502).json({ error: "Stream proxy error", details: err.message });
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[Stream Proxy Error] Failed for ${rawUrl}:`, message);
+      if (!res.headersSent) {
+        res.status(502).json({ error: "Stream proxy error", details: message });
+      }
     }
   });
 
-  // Serve static assets OR setup Vite middleware
   if (process.env.NODE_ENV !== "production") {
     console.log("[Server] Booting in DEVELOPMENT mode with Vite Middleware");
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa"
@@ -184,4 +178,7 @@ async function startServer() {
   });
 }
 
-startServer();
+startServer().catch((error) => {
+  console.error("[Server] Fatal startup error:", error);
+  process.exitCode = 1;
+});
