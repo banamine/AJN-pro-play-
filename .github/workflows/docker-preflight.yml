@@ -1,0 +1,57 @@
+name: AJN Docker Preflight
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ajn-docker-preflight-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  docker-preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build production image
+        run: docker build --pull --tag ajn-pro-play-preflight:${{ github.sha }} .
+
+      - name: Start container
+        run: |
+          docker run --detach             --name ajn-pro-play-preflight             --publish 18080:8080             --env PORT=8080             ajn-pro-play-preflight:${{ github.sha }}
+
+      - name: Wait for readiness
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in {1..30}; do
+            if curl --fail --silent --show-error http://127.0.0.1:18080/readyz; then
+              echo
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Container did not become ready."
+          docker logs ajn-pro-play-preflight || true
+          exit 1
+
+      - name: Validate health endpoint
+        run: |
+          curl --fail --silent --show-error http://127.0.0.1:18080/healthz
+          echo
+
+      - name: Collect container diagnostics on failure
+        if: failure()
+        run: docker logs ajn-pro-play-preflight || true
+
+      - name: Stop container
+        if: always()
+        run: docker rm --force ajn-pro-play-preflight || true

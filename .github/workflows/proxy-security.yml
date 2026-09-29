@@ -1,0 +1,38 @@
+name: AJN Proxy Security
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ajn-proxy-security-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  proxy-security:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Build proxy test modules
+        run: npm run build:test-modules
+
+      - name: Run stream URL and SSRF proxy regressions
+        run: node --test --test-reporter spec tests/stream-url.test.cjs tests/stream-proxy.test.cjs
