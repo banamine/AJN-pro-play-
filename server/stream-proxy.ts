@@ -97,11 +97,15 @@ function embeddedIpv4FromIpv6(address: string): string | null {
   const value = ipv6ToBigInt(address);
   if (value === null) return null;
 
-  const top32 = value >> 96n;
-  const top16 = value >> 112n;
+  const mappedPrefix = (value >> 32n) & 0xffffffffffffn;
+  const nat64Prefix = value >> 96n;
+  const sixToFourPrefix = value >> 112n;
 
-  if (top32 === 0xffffn || top32 === 0x64ff9bn || top16 === 0x2002n) {
-    const ipv4Value = Number(value & 0xffffffffn);
+  if (mappedPrefix === 0xffffn || nat64Prefix === 0x64ff9bn || sixToFourPrefix === 0x2002n) {
+    const ipv4Value =
+      sixToFourPrefix === 0x2002n
+        ? Number((value >> 64n) & 0xffffffffn)
+        : Number(value & 0xffffffffn);
     return [
       (ipv4Value >>> 24) & 255,
       (ipv4Value >>> 16) & 255,
@@ -157,7 +161,8 @@ export async function resolvePublicAddresses(
 function requestOnce(
   parsed: URL,
   addresses: ResolvedAddress[],
-  signal: AbortSignal
+  signal: AbortSignal,
+  addressPolicy: typeof isPublicAddress
 ): Promise<{ response: http.IncomingMessage; body: Readable }> {
   const transport = parsed.protocol === "https:" ? https : http;
   const port = parsed.port ? Number(parsed.port) : parsed.protocol === "https:" ? 443 : 80;
@@ -201,7 +206,7 @@ function requestOnce(
       },
       (response) => {
         const usedAddress = addresses.find((entry) => entry.family === usedFamily);
-        if (!usedFamily || !usedAddress || !isPublicAddress(usedAddress.address, usedFamily)) {
+        if (!usedFamily || !usedAddress || !addressPolicy(usedAddress.address, usedFamily)) {
           response.destroy(new Error("Blocked stream host"));
           reject(new Error("Blocked stream host"));
           return;
@@ -253,7 +258,7 @@ export async function openStreamProxy(
     let response: http.IncomingMessage;
     let body: Readable;
     try {
-      ({ response, body } = await requestOnce(parsed, addresses, signal));
+      ({ response, body } = await requestOnce(parsed, addresses, signal, addressPolicy));
     } catch (error) {
       if (signal.aborted) throw error;
       return { ok: false, status: 502, error: "Stream proxy connection failed" };
