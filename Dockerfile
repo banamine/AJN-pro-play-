@@ -15,6 +15,7 @@ ENV NODE_ENV=production
 
 COPY --from=build /app/package.json ./package.json
 COPY --from=build /app/dist ./dist
+RUN npm install --omit=dev
 
 EXPOSE 8080
 USER node
