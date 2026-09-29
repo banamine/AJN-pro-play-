@@ -58,7 +58,7 @@ export function validateStreamProxyUrl(rawUrl: string): StreamUrlValidation {
     return { ok: false, error: "Unsupported stream URL protocol" };
   }
 
-  const hostname = parsed.hostname.replace(/^[|]$/g, "").toLowerCase();
+  const hostname = parsed.hostname.replace(/^\[|\]$/g, "").toLowerCase();
   if (BLOCKED_HOSTNAMES.has(hostname)) {
     return { ok: false, error: "Blocked stream host" };
   }
