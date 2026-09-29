@@ -1,1 +1,0 @@
-Rumble integration documentation has been moved into the dedicated documentation PR branch.
