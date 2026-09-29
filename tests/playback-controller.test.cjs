@@ -180,3 +180,51 @@ test("destroy is idempotent at the engine boundary", () => {
   assert.equal(controller.getState().status, "idle");
   assert.equal(controller.getState().source, null);
 });
+
+test("HLS preservation hooks receive the active source and saved position", () => {
+  const video = createVideo();
+  const harness = createHlsHarness();
+  let configuredSource = null;
+  const controller = new PlaybackController({
+    video,
+    hlsFactory: () => harness.instance,
+    isHlsSupported: () => true,
+    hlsEvents: EVENTS,
+    getSavedPosition: (url) => url.includes("resume") ? 42 : 0,
+    hlsConfigFactory: (source) => {
+      configuredSource = source;
+      return { enableWorker: false };
+    },
+  });
+
+  controller.load({ url: "https://a.example/resume.m3u8", title: "Resume", kind: "hls" });
+  harness.emit(EVENTS.MANIFEST_PARSED, {});
+
+  assert.equal(configuredSource.title, "Resume");
+  assert.equal(video.currentTime, 42);
+  assert.equal(video.playCalls, 1);
+});
+
+test("unrecoverable HLS errors hand off to the application fallback callback", () => {
+  const video = createVideo();
+  const harness = createHlsHarness();
+  let fatalSource = null;
+  let fatalMessage = null;
+  const controller = new PlaybackController({
+    video,
+    hlsFactory: () => harness.instance,
+    isHlsSupported: () => true,
+    hlsEvents: EVENTS,
+    onFatalError: (source, message) => {
+      fatalSource = source;
+      fatalMessage = message;
+    },
+  });
+
+  controller.load({ url: "https://a.example/live.m3u8", title: "Live", kind: "hls" });
+  harness.emit(EVENTS.ERROR, { fatal: true, type: "unrecoverable", details: "fatalStreamError" });
+
+  assert.equal(fatalSource.title, "Live");
+  assert.equal(fatalMessage, "HLS error [details: fatalStreamError, type: unrecoverable, fatal: true]");
+  assert.equal(controller.getState().status, "error");
+});
