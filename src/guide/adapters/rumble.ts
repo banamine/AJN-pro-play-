@@ -1,6 +1,8 @@
 import type { EpgChannelSchedule, EpgProgram } from "../../../types/guide";
-import type { RumbleSyncChannelState } from "../../rumble/sync-circuit-breaker";
-import type { RumbleVideoItem } from "../../../types/rumble";
+import type {
+  RumbleChannelContract,
+  RumbleVideoItem,
+} from "../../../types/rumble";
 
 /** Default duration for VOD items when no subsequent program exists (30 minutes in ms). */
 const DEFAULT_VOD_DURATION_MS = 30 * 60 * 1000;
@@ -23,7 +25,7 @@ function parsePublishDate(
  * are unavailable. The stable ID prevents virtualized UI key thrashing.
  */
 function createFallbackProgram(
-  state: RumbleSyncChannelState,
+  state: RumbleChannelContract,
   now: number,
 ): EpgProgram {
   const startTime = state.lastSyncedAt
@@ -79,7 +81,7 @@ function mapRumbleVideoToProgram(
  * The input state is never mutated.
  */
 export function adaptRumbleStateToEpgSchedule(
-  state: RumbleSyncChannelState,
+  state: RumbleChannelContract,
   now: number,
 ): EpgChannelSchedule {
   const isCircuitOpen = state.syncStatus === "circuit_open";
