@@ -14,8 +14,8 @@ The rebuild starts from the existing application on `main`, but runtime infrastr
 6. CI executes lint -> pure-regressions -> integration.
 7. Legacy Jekyll Pages deployment is removed from the application path.
 
-## Next phase
+## Current phase
 
-Phase 1 establishes explicit runtime boundaries before the greenfield UI/player rebuild.
+Phase 2 establishes the playback-engine boundary before the greenfield UI/player rebuild. The controller contract and preservation hooks are in place; application integration remains controlled and must preserve existing HLS tuning, resume behavior, custom request headers, recovery, and proxy fallback.
 
-See `docs/PHASE-1-RUNTIME-BOUNDARIES.md` for scope and gates.
+See `docs/PHASE-2-PLAYBACK-CORE.md` for scope, findings, and gates.
