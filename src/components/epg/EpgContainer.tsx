@@ -128,10 +128,6 @@ export function EpgContainer({
     [focusedCell.row, visibleProgramsByChannel],
   );
 
-  useEffect(() => {
-    if (!isFocusRegionActive) return;
-    focusCell(focusedCell.row, focusedCell.column);
-  }, [isFocusRegionActive, focusCell, focusedCell.column, focusedCell.row]);
 
   useEffect(() => {
     if (!activeChannelId) return;
