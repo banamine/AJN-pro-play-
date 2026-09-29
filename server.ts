@@ -118,9 +118,17 @@ async function startServer() {
     const feedUrl = typeof req.query.url === "string" ? req.query.url : undefined;
     if (!feedUrl) return res.status(400).json({ error: "Missing required query parameter: url" });
 
-    const result = await fetchRumbleRss(feedUrl);
-    if (!result.ok) return res.status(result.status).json({ error: result.error });
-    return res.json({ success: true, feedUrl: result.feedUrl, count: result.videos.length, videos: result.videos });
+    const rssResult = await fetchRumbleRss(feedUrl);
+    if (!rssResult.ok) {
+      return res.status(rssResult.status).json({ error: rssResult.error });
+    }
+
+    return res.json({
+      success: true,
+      feedUrl: rssResult.feedUrl,
+      count: rssResult.videos.length,
+      videos: rssResult.videos,
+    });
   });
 
   app.get("/api/stream-proxy", async (req, res) => {
