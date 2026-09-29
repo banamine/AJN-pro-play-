@@ -129,23 +129,24 @@ async function startServer() {
       console.log(`[Stream Proxy] Validating and fetching stream: ${rawUrl}`);
       const result = await openStreamProxy(rawUrl, abortController.signal);
 
-      if (!result.ok) {
-        return res.status(result.status).json({ error: result.error });
+      if (result.ok === true) {
+        for (const [name, value] of Object.entries(result.headers)) {
+          res.setHeader(name, value);
+        }
+        res.setHeader("Access-Control-Allow-Origin", "*");
+        res.setHeader("Cache-Control", "no-cache");
+        result.body.on("error", (error) => {
+          if (!res.headersSent) {
+            res.status(502).json({ error: "Stream proxy error" });
+          } else {
+            res.destroy(error);
+          }
+        });
+        result.body.pipe(res);
+        return;
       }
 
-      for (const [name, value] of Object.entries(result.headers)) {
-        res.setHeader(name, value);
-      }
-      res.setHeader("Access-Control-Allow-Origin", "*");
-      res.setHeader("Cache-Control", "no-cache");
-      result.body.on("error", (error) => {
-        if (!res.headersSent) {
-          res.status(502).json({ error: "Stream proxy error" });
-        } else {
-          res.destroy(error);
-        }
-      });
-      result.body.pipe(res);
+      return res.status(result.status).json({ error: result.error });
     } catch (err) {
       if (abortController.signal.aborted) {
         console.log("[Stream Proxy] Connection aborted successfully.");
