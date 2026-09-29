@@ -254,7 +254,7 @@ export class RumbleSyncEngine {
         return { ok: false, state: this.cloneState(runtime.state) };
       }
 
-      if (result.ok) {
+      if (result.ok === true) {
         runtime.breaker.recordSuccess();
         this.applySuccess(runtime, generation, result.videos);
         this.options.onTelemetry?.({
