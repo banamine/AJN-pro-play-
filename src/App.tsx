@@ -430,6 +430,7 @@ export default function App() {
   const channelsRef = useRef<IPTVChannel[]>(channels);
   channelsRef.current = channels;
   const handlePlayerErrorRef = useRef<(failedUrl: string, titleStr: string) => void>(() => {});
+  const pendingPlaybackRef = useRef<{ url: string; title: string; kind: "hls" | "native" | "rumble" } | null>(null);
   const siriusAudioRef = useRef<HTMLAudioElement | null>(null);
   const siriusCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const siriusCanvasHeightsRef = useRef<number[]>(new Array(120).fill(0));
@@ -594,6 +595,12 @@ export default function App() {
         setTimeout(() => handlePlayerErrorRef.current(source.url, source.title), 1500);
       },
     });
+
+    const pendingPlayback = pendingPlaybackRef.current;
+    if (pendingPlayback) {
+      pendingPlaybackRef.current = null;
+      playbackControllerRef.current.load(pendingPlayback);
+    }
 
     return () => {
       playbackControllerRef.current?.destroy();
@@ -1829,7 +1836,8 @@ export default function App() {
 
     const controller = playbackControllerRef.current;
     if (!controller) {
-      addLog("Playback engine is not initialized yet; stream request was not mounted.", "error");
+      pendingPlaybackRef.current = { url, title: titleStr, kind: typeToUse };
+      addLog("Playback engine is initializing; stream request queued.", "info");
       return;
     }
 
