@@ -104,7 +104,7 @@ function embeddedIpv4FromIpv6(address: string): string | null {
   if (mappedPrefix === 0xffffn || nat64Prefix === 0x64ff9bn || sixToFourPrefix === 0x2002n) {
     const ipv4Value =
       sixToFourPrefix === 0x2002n
-        ? Number((value >> 64n) & 0xffffffffn)
+        ? Number((value >> 80n) & 0xffffffffn)
         : Number(value & 0xffffffffn);
     return [
       (ipv4Value >>> 24) & 255,
