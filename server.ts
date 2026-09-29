@@ -1,7 +1,6 @@
 import express from "express";
 import path from "path";
-import { Readable } from "stream";
-import { validateStreamProxyUrl } from "./server/stream-url.ts";
+import { openStreamProxy } from "./server/stream-proxy.ts";
 
 async function startServer() {
   const app = express();
@@ -22,7 +21,6 @@ async function startServer() {
     res.status(200).json({ status: "ready" });
   });
 
-  // API Route 1: Parse and serve AJN RSS video archive with zero CORS issues
   app.get("/api/ajn-archive", async (req, res) => {
     try {
       const RSS_URL = "https://rss.alexjones.media/AJNHourlyVideo.xml";
@@ -121,11 +119,6 @@ async function startServer() {
       return res.status(400).json({ error: "Missing required query parameter: url" });
     }
 
-    const validated = validateStreamProxyUrl(rawUrl);
-    if (validated.ok === false) {
-      return res.status(400).json({ error: validated.error });
-    }
-
     const abortController = new AbortController();
     req.on("close", () => {
       console.log("[Stream Proxy] Client closed request. Aborting upstream connection.");
@@ -133,38 +126,36 @@ async function startServer() {
     });
 
     try {
-      console.log(`[Stream Proxy] Fetching stream: ${validated.url}`);
+      console.log(`[Stream Proxy] Validating and fetching stream: ${rawUrl}`);
+      const result = await openStreamProxy(rawUrl, abortController.signal);
 
-      const response = await fetch(validated.url, {
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
-        },
-        signal: abortController.signal
-      });
-
-      if (!response.ok) {
-        throw new Error(`Failed to fetch remote stream. Status: ${response.status}`);
+      if (result.ok === true) {
+        for (const [name, value] of Object.entries(result.headers)) {
+          res.setHeader(name, value);
+        }
+        res.setHeader("Access-Control-Allow-Origin", "*");
+        res.setHeader("Cache-Control", "no-cache");
+        result.body.on("error", (error) => {
+          if (!res.headersSent) {
+            res.status(502).json({ error: "Stream proxy error" });
+          } else {
+            res.destroy(error);
+          }
+        });
+        result.body.pipe(res);
+        return;
       }
 
-      const contentType = response.headers.get("content-type");
-      if (contentType) res.setHeader("Content-Type", contentType);
-      res.setHeader("Access-Control-Allow-Origin", "*");
-      res.setHeader("Cache-Control", "no-cache");
-
-      if (response.body) {
-        Readable.fromWeb(response.body as any).pipe(res);
-      } else {
-        res.status(500).send("No stream body found");
-      }
+      return res.status(result.status).json({ error: result.error });
     } catch (err) {
-      if (err instanceof Error && err.name === "AbortError") {
+      if (abortController.signal.aborted) {
         console.log("[Stream Proxy] Connection aborted successfully.");
         return;
       }
       const message = err instanceof Error ? err.message : String(err);
-      console.error(`[Stream Proxy Error] Failed for ${validated.url}:`, message);
+      console.error("[Stream Proxy Error]:", message);
       if (!res.headersSent) {
-        res.status(502).json({ error: "Stream proxy error", details: message });
+        res.status(502).json({ error: "Stream proxy error" });
       }
     }
   });
