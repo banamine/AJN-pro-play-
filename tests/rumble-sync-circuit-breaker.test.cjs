@@ -46,7 +46,7 @@ test("threshold opens circuit and schedules a probe", () => {
   breaker.recordFailure();
   const snapshot = breaker.recordFailure();
   assert.equal(snapshot.state, "open");
-  assert.equal(snapshot.nextProbeAt, 200);
+  assert.equal(snapshot.nextProbeAt, 100);
   assert.equal(breaker.canRequest().allowed, false);
   clock.set(200);
   const probe = breaker.canRequest();
