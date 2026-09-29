@@ -1,7 +1,15 @@
+import type { Key } from "react";
 import type { EpgProgram } from "../../../types/guide";
 import { getProgramGeometry, type TimelineWindow } from "./timeline-geometry";
 
-export interface EpgProgramTileProps { program: EpgProgram; window: TimelineWindow; pixelsPerMs: number; isCurrent: boolean; onSelect: (program: EpgProgram) => void; }
+export interface EpgProgramTileProps {
+  key?: Key;
+  program: EpgProgram;
+  window: TimelineWindow;
+  pixelsPerMs: number;
+  isCurrent: boolean;
+  onSelect: (program: EpgProgram) => void;
+}
 
 export function EpgProgramTile({ program, window, pixelsPerMs, isCurrent, onSelect }: EpgProgramTileProps) {
   const geometry = getProgramGeometry(program, window, pixelsPerMs);
