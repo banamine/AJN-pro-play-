@@ -119,7 +119,7 @@ async function startServer() {
     if (!feedUrl) return res.status(400).json({ error: "Missing required query parameter: url" });
 
     const rssResult = await fetchRumbleRss(feedUrl);
-    if (!rssResult.ok) {
+    if (rssResult.ok === false) {
       return res.status(rssResult.status).json({ error: rssResult.error });
     }
 
