@@ -1,4 +1,4 @@
-import type { EpgProgram } from "../../types/guide";
+import type { EpgProgram } from "../../../types/guide";
 import { getProgramGeometry, type TimelineWindow } from "./timeline-geometry";
 
 export interface EpgProgramTileProps { program: EpgProgram; window: TimelineWindow; pixelsPerMs: number; isCurrent: boolean; onSelect: (program: EpgProgram) => void; }
