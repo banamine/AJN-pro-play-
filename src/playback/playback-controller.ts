@@ -217,6 +217,10 @@ export class PlaybackController {
       return;
     }
     this.fail(generation, message);
+    // Terminal failures must release the active engine before application fallback.
+    // Advance the generation so callbacks from the retired HLS instance are ignored.
+    ++this.generation;
+    this.destroyEngine();
     this.onFatalError?.(source, message);
   }
 
