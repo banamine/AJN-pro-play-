@@ -181,7 +181,9 @@ export class PlaybackController {
   }
 
   private handleFatalHlsError(hls: Hls, source: PlaybackSource, generation: number, data: any): void {
-    const message = `HLS error [details: ${data.details}, type: ${data.type}, fatal: ${data.fatal}]`;
+    const message = data.fatal
+      ? `HLS fatal error: ${data.details}`
+      : `HLS error [details: ${data.details}, type: ${data.type}, fatal: ${data.fatal}]`;
     const errorTypes = Hls.ErrorTypes;
     if (data.type === errorTypes.NETWORK_ERROR) {
       this.onLog?.(`${message}. Fatal network error - reloading stream pipeline...`, "warning");
