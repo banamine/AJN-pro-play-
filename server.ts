@@ -1,6 +1,7 @@
 import express from "express";
 import path from "path";
 import { openStreamProxy } from "./server/stream-proxy.ts";
+import { fetchRumbleRss } from "./server/rumble-rss.ts";
 
 async function startServer() {
   const app = express();
@@ -111,6 +112,15 @@ async function startServer() {
       console.error("[Proxy Error] Failed to process AJN Archive feed:", message);
       res.status(500).json({ success: false, error: message });
     }
+  });
+
+  app.get("/api/rumble/rss", async (req, res) => {
+    const feedUrl = typeof req.query.url === "string" ? req.query.url : undefined;
+    if (!feedUrl) return res.status(400).json({ error: "Missing required query parameter: url" });
+
+    const result = await fetchRumbleRss(feedUrl);
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json({ success: true, feedUrl: result.feedUrl, count: result.videos.length, videos: result.videos });
   });
 
   app.get("/api/stream-proxy", async (req, res) => {
