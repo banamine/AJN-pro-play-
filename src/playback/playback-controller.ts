@@ -1,6 +1,5 @@
 import Hls from "hls.js";
 import { teardownHlsInstance } from "./hls-lifecycle.ts";
-import type { IPTVChannel } from "../types.ts";
 
 export type PlaybackSourceKind = "hls" | "native" | "rumble";
 
@@ -28,7 +27,6 @@ export interface PlaybackControllerOptions {
   onLog?: (message: string, type?: "info" | "warning" | "error") => void;
   getSavedPosition?: (url: string) => number;
   hlsConfigFactory?: (source: PlaybackSource) => ConstructorParameters<typeof Hls>[0];
-  channel?: IPTVChannel | null;
   onFatalError?: (source: PlaybackSource, message: string) => void;
 }
 
@@ -46,9 +44,9 @@ export class PlaybackController {
   private readonly onLog?: PlaybackControllerOptions["onLog"];
   private readonly getSavedPosition?: PlaybackControllerOptions["getSavedPosition"];
   private readonly hlsConfigFactory?: PlaybackControllerOptions["hlsConfigFactory"];
-  private readonly channel?: IPTVChannel | null;
   private readonly onFatalError?: PlaybackControllerOptions["onFatalError"];
   private hls: Hls | null = null;
+  private readonly mediaErrorCounts = new WeakMap<object, number>();
   private generation = 0;
   private destroyed = false;
   private state: PlaybackState = { generation: 0, status: "idle", source: null, error: null };
@@ -62,7 +60,6 @@ export class PlaybackController {
     this.onLog = options.onLog;
     this.getSavedPosition = options.getSavedPosition;
     this.hlsConfigFactory = options.hlsConfigFactory;
-    this.channel = options.channel;
     this.onFatalError = options.onFatalError;
   }
 
@@ -192,8 +189,8 @@ export class PlaybackController {
       return;
     }
     if (data.type === errorTypes.MEDIA_ERROR) {
-      const count = ((hls as Hls & { __ajnMediaErrors?: number }).__ajnMediaErrors ?? 0) + 1;
-      (hls as Hls & { __ajnMediaErrors?: number }).__ajnMediaErrors = count;
+      const count = (this.mediaErrorCounts.get(hls) ?? 0) + 1;
+      this.mediaErrorCounts.set(hls, count);
       if (count === 1) {
         this.onLog?.(`${message}. Attempting media recovery...`, "warning");
         hls.recoverMediaError();
@@ -205,7 +202,7 @@ export class PlaybackController {
         hls.recoverMediaError();
         return;
       }
-      (hls as Hls & { __ajnMediaErrors?: number }).__ajnMediaErrors = 0;
+      this.mediaErrorCounts.set(hls, 0);
     }
     this.fail(generation, message);
     this.onFatalError?.(source, message);
