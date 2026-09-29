@@ -1,7 +1,17 @@
-import { useMemo, useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { EpgProgram, TimeProvider } from "../../../types/guide";
 import { adaptRumbleStateToEpgSchedule } from "../../guide/adapters/rumble";
 import type { RumbleSyncChannelState } from "../../rumble/sync-circuit-breaker.ts";
+import {
+  moveMacroFocus,
+  type FocusRegion,
+} from "./spatial-focus.ts";
+import { resolvePinnedState } from "./viewport-pinning.ts";
 import {
   EpgContainer,
   type EpgChannel,
@@ -72,6 +82,10 @@ export function RumbleTVStationView({
   onSelectChannel,
 }: RumbleTVStationViewProps) {
   const [previewProgram, setPreviewProgram] = useState<EpgProgram | null>(null);
+  const [isPinned, setIsPinned] = useState(false);
+  const [activeFocusRegion, setActiveFocusRegion] =
+    useState<FocusRegion>("carousel");
+  const playerAnchorRef = useRef<HTMLDivElement | null>(null);
 
   const activeChannel =
     channels.find((channel) => channel.id === activeChannelId) ?? channels[0];
@@ -100,6 +114,65 @@ export function RumbleTVStationView({
     [channels, timeProvider],
   );
 
+  useEffect(() => {
+    const anchor = playerAnchorRef.current;
+    if (!anchor || typeof IntersectionObserver === "undefined") return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry) setIsPinned(resolvePinnedState(entry));
+      },
+      { threshold: 0 },
+    );
+
+    observer.observe(anchor);
+    return () => observer.disconnect();
+  }, []);
+
+  const focusRegion = (region: FocusRegion) => {
+    setActiveFocusRegion(region);
+
+    requestAnimationFrame(() => {
+      const selector = {
+        carousel: '[data-rumble-carousel="v1"] button',
+        player: '[data-rumble-player-container="v2"]',
+        epg: '[data-epg-container="v2"]',
+      }[region];
+
+      document.querySelector<HTMLElement>(selector)?.focus();
+    });
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        focusRegion("carousel");
+        return;
+      }
+
+      if (activeFocusRegion === "epg") return;
+
+      const direction =
+        event.key === "ArrowUp"
+          ? "up"
+          : event.key === "ArrowDown"
+            ? "down"
+            : null;
+
+      if (!direction) return;
+
+      const next = moveMacroFocus(activeFocusRegion, direction);
+      if (next !== activeFocusRegion) {
+        event.preventDefault();
+        focusRegion(next);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [activeFocusRegion]);
+
   if (!activeChannel) return null;
 
   const handleProgramSelect = (event: EpgProgramSelectEvent) => {
@@ -115,7 +188,17 @@ export function RumbleTVStationView({
   return (
     <div
       className="flex w-full flex-col gap-3 overflow-hidden"
-      data-rumble-tv-station="v2"
+      data-rumble-tv-station="v3"
+      onFocusCapture={(event) => {
+        const target = event.target as HTMLElement;
+        if (target.closest('[data-rumble-carousel="v1"]')) {
+          setActiveFocusRegion("carousel");
+        } else if (target.closest('[data-rumble-player-container="v2"]')) {
+          setActiveFocusRegion("player");
+        } else if (target.closest('[data-epg-container="v2"]')) {
+          setActiveFocusRegion("epg");
+        }
+      }}
     >
       <RumbleChannelCarousel
         channels={channels}
@@ -126,11 +209,18 @@ export function RumbleTVStationView({
         }}
       />
 
-      <RumblePlayerContainer
-        activeEmbedUrl={activeChannel.activeEmbedUrl}
-        channelTitle={activeChannel.cleanTitle}
-        fallback={isRumbleFallbackState(activeChannel)}
-      />
+      <div
+        ref={playerAnchorRef}
+        className="relative aspect-video w-full"
+        data-rumble-player-anchor="v1"
+      >
+        <RumblePlayerContainer
+          activeEmbedUrl={activeChannel.activeEmbedUrl}
+          channelTitle={activeChannel.cleanTitle}
+          fallback={isRumbleFallbackState(activeChannel)}
+          isPinned={isPinned}
+        />
+      </div>
 
       <RumbleMetadataOverlay channel={activeChannel} />
 
@@ -156,6 +246,10 @@ export function RumbleTVStationView({
             windowEndEpoch={guideWindow.windowEndEpoch}
             timeProvider={timeProvider}
             activeChannelId={activeChannel.id}
+            isFocusRegionActive={activeFocusRegion === "epg"}
+            onFocusBoundary={(direction) => {
+              if (direction === "up") focusRegion("player");
+            }}
             onSelectChannel={(channelId) => {
               setPreviewProgram(null);
               onSelectChannel(channelId);

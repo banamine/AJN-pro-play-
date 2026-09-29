@@ -1,22 +1,26 @@
 import { memo } from "react";
 import { RumbleIframe } from "../RumbleIframe.tsx";
+import { getPlayerViewportClassName } from "./viewport-pinning.ts";
 
 export interface RumblePlayerContainerProps {
   activeEmbedUrl: string;
   channelTitle: string;
   fallback: boolean;
+  isPinned?: boolean;
 }
 
 export const RumblePlayerContainer = memo(function RumblePlayerContainer({
   activeEmbedUrl,
   channelTitle,
   fallback,
+  isPinned = false,
 }: RumblePlayerContainerProps) {
   return (
     <section
-      className="relative w-full overflow-hidden rounded-[28px] border border-slate-800/70 bg-black shadow-2xl"
-      aria-label={`${channelTitle} Rumble player`}
-      data-rumble-player-container="v1"
+      tabIndex={0}
+      className={getPlayerViewportClassName(isPinned)}
+      aria-label={channelTitle + " Rumble player"}
+      data-rumble-player-container="v2"
     >
       <RumbleIframe embedUrl={activeEmbedUrl} className="rounded-[28px]" />
 
