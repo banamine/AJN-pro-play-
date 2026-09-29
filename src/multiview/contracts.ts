@@ -1,0 +1,32 @@
+import type { MultiViewPattern, MultiViewResourcePolicy, MultiViewRuntimeState, TileId, TileResourcePolicy } from "../types/multiview";
+const TILE_ORDER: TileId[] = ["tile-0", "tile-1", "tile-2", "tile-3"];
+export function createInitialMultiViewState(pattern: MultiViewPattern): MultiViewRuntimeState {
+  return { activePatternId: pattern.id, focusedPanelId: pattern.panels[0]?.instanceId ?? null, activeAudioPanelId: pattern.panels[0]?.instanceId ?? null, focusContext: "GRID", panels: pattern.panels.map((panel) => ({ ...panel })) };
+}
+export function updateTileChannel(state: MultiViewRuntimeState, tileId: TileId, channelId: string | null): MultiViewRuntimeState {
+  return { ...state, panels: state.panels.map((panel) => panel.instanceId === tileId ? { ...panel, channelId } : panel) };
+}
+export function applyPattern(pattern: MultiViewPattern): MultiViewRuntimeState { return createInitialMultiViewState(pattern); }
+export function moveGridFocus(focusedTileId: TileId, direction: "ArrowUp" | "ArrowDown" | "ArrowLeft" | "ArrowRight"): TileId {
+  const index = TILE_ORDER.indexOf(focusedTileId);
+  const row = Math.floor(index / 2);
+  const column = index % 2;
+  if (direction === "ArrowLeft") return column === 0 ? focusedTileId : TILE_ORDER[index - 1];
+  if (direction === "ArrowRight") return column === 1 ? focusedTileId : TILE_ORDER[index + 1];
+  if (direction === "ArrowUp") return row === 0 ? focusedTileId : TILE_ORDER[index - 2];
+  return row === 1 ? focusedTileId : TILE_ORDER[index + 2];
+}
+export function moveMenuSelection(index: number, itemCount: number, direction: "ArrowUp" | "ArrowDown"): number {
+  if (itemCount <= 0) return 0;
+  return direction === "ArrowUp" ? Math.max(0, index - 1) : Math.min(itemCount - 1, index + 1);
+}
+export function calculateTileResourcePolicy(tileId: TileId, tileIndex: number, focusedTileId: TileId | null, policy: MultiViewResourcePolicy): TileResourcePolicy {
+  if (tileId === focusedTileId) return { priorityTier: 1, targetResolution: "1080p", capLevelToPlayerSize: false, staggerDelayMs: 0, admitted: true };
+  const activeBackgroundSlots = Math.max(0, policy.maxActiveDecoders - 1);
+  if (tileIndex < activeBackgroundSlots) return { priorityTier: 2, targetResolution: "480p", capLevelToPlayerSize: true, staggerDelayMs: (tileIndex + 1) * policy.staggeredStartDelayMs, admitted: true };
+  return { priorityTier: 3, targetResolution: "poster", capLevelToPlayerSize: true, staggerDelayMs: 0, admitted: false };
+}
+export function setAudioFocus(activeAudioTileId: TileId | null, requestedTileId: TileId, isAudioLocked: boolean, forceLock = false): { activeAudioTileId: TileId; isAudioLocked: boolean } {
+  if (isAudioLocked && !forceLock) return { activeAudioTileId: activeAudioTileId ?? requestedTileId, isAudioLocked };
+  return { activeAudioTileId: requestedTileId, isAudioLocked: isAudioLocked || forceLock };
+}
