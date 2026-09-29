@@ -174,6 +174,11 @@ export class PlaybackController {
     const savedPos = this.getSavedPosition?.(source.url) ?? 0;
     this.video.src = source.url;
     this.video.load();
+    if (savedPos > 0) {
+      this.video.addEventListener("loadedmetadata", () => {
+        if (this.isCurrentGeneration(generation)) this.video.currentTime = savedPos;
+      }, { once: true });
+    }
     this.video.play().then(
       () => this.updateStatus("playing", generation),
       () => this.updateStatus("paused", generation),
@@ -204,7 +209,12 @@ export class PlaybackController {
         hls.recoverMediaError();
         return;
       }
+      this.onLog?.(`${message}. Consecutive media errors unresolved: hard reloading media source engine...`, "error");
       this.mediaErrorCounts.set(hls, 0);
+      hls.detachMedia();
+      hls.loadSource(source.url);
+      hls.attachMedia(this.video);
+      return;
     }
     this.fail(generation, message);
     this.onFatalError?.(source, message);
