@@ -1834,16 +1834,15 @@ export default function App() {
     setHistory(updatedHistory);
     localStorage.setItem("ajn_iptv_history", JSON.stringify(updatedHistory));
 
+    const typeToUse = streamType === "auto"
+      ? (url.endsWith(".m3u8") || url.includes("m3u8") ? "hls" : "native")
+      : streamType;
     const controller = playbackControllerRef.current;
     if (!controller) {
       pendingPlaybackRef.current = { url, title: titleStr, kind: typeToUse };
       addLog("Playback engine is initializing; stream request queued.", "info");
       return;
     }
-
-    const typeToUse = streamType === "auto"
-      ? (url.endsWith(".m3u8") || url.includes("m3u8") ? "hls" : "native")
-      : streamType;
     controller.load({ url, title: titleStr, kind: typeToUse });
   };
 
