@@ -527,8 +527,9 @@ export default function App() {
 
   // Media engine boundary: App retains orchestration while PlaybackController owns HLS/native lifecycle.
   useEffect(() => {
+    const playerIsMounted = mainViewerMode === "standard" && !isRumbleUrl(currentUrl);
     const video = videoRef.current;
-    if (!video || playbackControllerRef.current) return;
+    if (!playerIsMounted || !video || playbackControllerRef.current) return;
 
     playbackControllerRef.current = new PlaybackController({
       video,
@@ -598,7 +599,7 @@ export default function App() {
       playbackControllerRef.current?.destroy();
       playbackControllerRef.current = null;
     };
-  }, []);
+  }, [mainViewerMode, isRumbleUrl(currentUrl)]);
 
   // Load Saved Cache on Startup
   useEffect(() => {
