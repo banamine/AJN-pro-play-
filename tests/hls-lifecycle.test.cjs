@@ -27,12 +27,12 @@ test('teardown stops loading, detaches media, destroys HLS, then clears media', 
   ]);
 });
 
-test('teardown is safe when no HLS instance exists', () => {
+test('teardown clears native media even when no HLS instance exists', () => {
   const calls = [];
   teardownHlsInstance(null, {
     pause: () => calls.push('pause'),
     removeAttribute: () => calls.push('removeAttribute'),
     load: () => calls.push('load'),
   });
-  assert.deepEqual(calls, []);
+  assert.deepEqual(calls, ['pause', 'removeAttribute', 'load']);
 });

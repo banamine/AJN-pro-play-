@@ -35,8 +35,7 @@ import {
   HelpCircle,
   Share2
 } from "lucide-react";
-import Hls from "hls.js";
-import { teardownHlsInstance } from "./playback/hls-lifecycle.ts";
+import { PlaybackController } from "./playback/playback-controller.ts";
 import { motion, AnimatePresence } from "motion/react";
 import { IPTVChannel, PlaybackHistoryItem, ArchiveEpisode, ColorScheme } from "./types";
 import { buildM3U, buildWeeblyHtml, triggerClientDownload, buildLanguageSeparatedM3U, detectLanguage, buildTVExplorerHtml, buildVidGridHtml, buildPublicIPTVHtml, ExportEpisode } from "./utils/exportUtils";
@@ -427,7 +426,11 @@ export default function App() {
   // REFS
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const lastSavedTimeRef = useRef<number>(0);
-  const hlsRef = useRef<Hls | null>(null);
+  const playbackControllerRef = useRef<PlaybackController | null>(null);
+  const channelsRef = useRef<IPTVChannel[]>(channels);
+  channelsRef.current = channels;
+  const handlePlayerErrorRef = useRef<(failedUrl: string, titleStr: string) => void>(() => {});
+  const pendingPlaybackRef = useRef<{ url: string; title: string; kind: "hls" | "native" | "rumble" } | null>(null);
   const siriusAudioRef = useRef<HTMLAudioElement | null>(null);
   const siriusCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const siriusCanvasHeightsRef = useRef<number[]>(new Array(120).fill(0));
@@ -523,6 +526,88 @@ export default function App() {
     }
   };
 
+  // Media engine boundary: App retains orchestration while PlaybackController owns HLS/native lifecycle.
+  useEffect(() => {
+    const playerIsMounted = mainViewerMode === "standard" && !isRumbleUrl(currentUrl);
+    const video = videoRef.current;
+    if (!playerIsMounted || !video || playbackControllerRef.current) return;
+
+    playbackControllerRef.current = new PlaybackController({
+      video,
+      onStateChange: (state) => {
+        const statusMap: Record<string, "Idle" | "Loading" | "Playing" | "Paused" | "Error"> = {
+          idle: "Idle", loading: "Loading", playing: "Playing", paused: "Paused", error: "Error",
+        };
+        setPlayerStatus(statusMap[state.status]);
+      },
+      onLog: (message, type) => addLog(message, type === "error" ? "error" : type === "warning" ? "warning" : "info"),
+      getSavedPosition: getSavedVideoPosition,
+      hlsConfigFactory: (source) => {
+        const url = source.url;
+        const conn = (navigator as any).connection || (navigator as any).mozConnection || (navigator as any).webkitConnection;
+        let targetBufferLength = 30, targetMaxBufferLength = 60, maxBufferSizeValue = 50 * 1024 * 1024, backBufferLen = 90;
+        let syncSettings: Record<string, number> = {};
+        if (conn) {
+          const type = conn.effectiveType || "4g";
+          const downlink = conn.downlink || 10;
+          const isSaveData = conn.saveData || false;
+          if (type === "slow-2g" || type === "2g" || downlink < 1.5 || isSaveData) {
+            targetBufferLength = 8; targetMaxBufferLength = 16; maxBufferSizeValue = 8 * 1024 * 1024; backBufferLen = 10;
+            syncSettings = { maxBufferHole: 2, nudgeMaxRetry: 15, nudgeOffset: 0.15, highBufferWatchdogPeriod: 2, liveSyncDurationCount: 2 };
+          } else if (type === "3g" || downlink < 4) {
+            targetBufferLength = 15; targetMaxBufferLength = 30; maxBufferSizeValue = 20 * 1024 * 1024; backBufferLen = 30;
+            syncSettings = { maxBufferHole: 1.5, nudgeMaxRetry: 10, nudgeOffset: 0.1, highBufferWatchdogPeriod: 3 };
+          } else {
+            targetBufferLength = 40; targetMaxBufferLength = 80; maxBufferSizeValue = 65 * 1024 * 1024; backBufferLen = 120;
+            syncSettings = { maxBufferHole: 0.8, nudgeMaxRetry: 5 };
+          }
+        }
+        return {
+          enableWorker: true, maxMaxBufferLength: targetMaxBufferLength, maxBufferLength: targetBufferLength,
+          maxBufferSize: maxBufferSizeValue, lowLatencyMode: false, backBufferLength: backBufferLen,
+          xhrSetup: (xhr: XMLHttpRequest, requestUrl: string) => {
+            const matchedChannel = channelsRef.current.find((channel) => channel.url === url);
+            if (matchedChannel?.userAgent) {
+              try { xhr.setRequestHeader("User-Agent", matchedChannel.userAgent); }
+              catch (err) { console.warn("[AJN] Failed to set User-Agent header:", err); }
+            }
+            if (matchedChannel?.referer) {
+              try { xhr.setRequestHeader("Referer", matchedChannel.referer); }
+              catch (err) { console.debug("[AJN] Referer header required but cannot be set client-side:", matchedChannel.referer); }
+            }
+            if (requestUrl.includes("rumble") || requestUrl.includes("chunklist") || requestUrl.includes("bfap-rvuz")) {
+              try {
+                xhr.setRequestHeader("Referer", "https://rumble.com/");
+                xhr.setRequestHeader("Origin", "https://rumble.com");
+              } catch (err) { console.warn("Could not set custom hotlink-bypass headers:", err); }
+            }
+          },
+          manifestLoadingMaxRetry: 15, manifestLoadingRetryDelay: 1000, manifestLoadingMaxRetryTimeout: 10000,
+          levelLoadingMaxRetry: 15, levelLoadingRetryDelay: 1000, levelLoadingMaxRetryTimeout: 10000,
+          fragLoadingMaxRetry: 18, fragLoadingRetryDelay: 500, fragLoadingMaxRetryTimeout: 12000,
+          liveSyncDurationCount: 3, liveMaxLatencyDurationCount: 8, liveDurationInfinity: true,
+          forceKeyFrameOnDiscontinuity: true, maxBufferHole: 1.5, nudgeMaxRetry: 15, nudgeOffset: 0.1,
+          highBufferWatchdogPeriod: 3, ...syncSettings,
+        };
+      },
+      onFatalError: (source) => {
+        addLog("Unrecoverable fatal HLS error: " + source.title + ". Initiating deep direct proxy gateway fallback.", "error");
+        setTimeout(() => handlePlayerErrorRef.current(source.url, source.title), 1500);
+      },
+    });
+
+    const pendingPlayback = pendingPlaybackRef.current;
+    if (pendingPlayback) {
+      pendingPlaybackRef.current = null;
+      playbackControllerRef.current.load(pendingPlayback);
+    }
+
+    return () => {
+      playbackControllerRef.current?.destroy();
+      playbackControllerRef.current = null;
+    };
+  }, [mainViewerMode, isRumbleUrl(currentUrl)]);
+
   // Load Saved Cache on Startup
   useEffect(() => {
     // LocalStorage keys lookup
@@ -570,10 +655,8 @@ export default function App() {
     loadArchiveFeed(false);
 
     return () => {
-      if (hlsRef.current) {
-        teardownHlsInstance(hlsRef.current, videoRef.current);
-        hlsRef.current = null;
-      }
+      playbackControllerRef.current?.destroy();
+      playbackControllerRef.current = null;
     };
   }, []);
 
@@ -1722,275 +1805,45 @@ export default function App() {
   const playStream = (url: string, titleStr: string) => {
     stopSiriusMusic();
     setIsSiriusOverlayOpen(false);
-
     if (!url) return;
     addLog(`Loading stream pipeline: ${url}`);
 
     if (isRumbleUrl(url)) {
-      addLog(`Rumble Embed Stream Detected: Direct sandboxed engine bypass activated for optimized container embedding`, "info");
-      
-      if (hlsRef.current) {
-        addLog("Memory Leak Prevention: Detaching legacy media and destroying previous HLS instance", "info");
-        hlsRef.current.detachMedia();
-        hlsRef.current.destroy();
-        hlsRef.current = null;
-      }
-
+      addLog("Rumble Embed Stream Detected: Direct sandboxed engine bypass activated for optimized container embedding", "info");
+      playbackControllerRef.current?.load({ url, title: titleStr, kind: "rumble" });
       setPlayerStatus("Playing");
       setCurrentUrl(url);
       setCurrentTitle(titleStr);
-
       const historyItem: PlaybackHistoryItem = {
         id: `history_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
-        type: "stream",
-        name: titleStr,
-        url,
-        playedAt: new Date().toLocaleTimeString()
+        type: "stream", name: titleStr, url, playedAt: new Date().toLocaleTimeString()
       };
       const updatedHistory = [historyItem, ...history.filter(h => h.url !== url)].slice(0, 50);
       setHistory(updatedHistory);
       localStorage.setItem("ajn_iptv_history", JSON.stringify(updatedHistory));
       return;
     }
-    
-    setPlayerStatus("Loading");
+
     setCurrentUrl(url);
     setCurrentTitle(titleStr);
-
-    // Save into history
     const historyItem: PlaybackHistoryItem = {
       id: `history_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
-      type: "stream",
-      name: titleStr,
-      url,
-      playedAt: new Date().toLocaleTimeString()
+      type: "stream", name: titleStr, url, playedAt: new Date().toLocaleTimeString()
     };
     const updatedHistory = [historyItem, ...history.filter(h => h.url !== url)].slice(0, 50);
     setHistory(updatedHistory);
     localStorage.setItem("ajn_iptv_history", JSON.stringify(updatedHistory));
 
-    // Mount video pipeline
-    const video = videoRef.current;
-    if (!video) return;
-
-    if (hlsRef.current) {
-      addLog("Memory Leak Prevention: Stopping, detaching, and destroying previous HLS instance", "info");
-      teardownHlsInstance(hlsRef.current, video);
-      hlsRef.current = null;
+    const typeToUse = streamType === "auto"
+      ? (url.endsWith(".m3u8") || url.includes("m3u8") ? "hls" : "native")
+      : streamType;
+    const controller = playbackControllerRef.current;
+    if (!controller) {
+      pendingPlaybackRef.current = { url, title: titleStr, kind: typeToUse };
+      addLog("Playback engine is initializing; stream request queued.", "info");
+      return;
     }
-
-    const typeToUse = streamType === "auto" ? (url.endsWith(".m3u8") || url.includes("m3u8") ? "hls" : "native") : streamType;
-
-    if (typeToUse === "hls" && Hls.isSupported()) {
-      addLog("HLS Engine: Instantiating high-performance Hls.js segment buffer", "info");
-
-      // Scan connection specifications to prevent memory overflows, visual stalling, or A/V desync
-      const conn = (navigator as any).connection || (navigator as any).mozConnection || (navigator as any).webkitConnection;
-      let targetBufferLength = 30;
-      let targetMaxBufferLength = 60;
-      let maxBufferSizeValue = 50 * 1024 * 1024; // 50MB default
-      let backBufferLen = 90;
-      let networkCategory = "Broadband/WiFi (Default)";
-      let syncSettings = {};
-
-      if (conn) {
-        const type = conn.effectiveType || "4g";
-        const downlink = conn.downlink || 10;
-        const isSaveData = conn.saveData || false;
-
-        if (type === "slow-2g" || type === "2g" || downlink < 1.5 || isSaveData) {
-          networkCategory = `Volatile 2G Network (effectiveType: ${type}, speed: ${downlink}Mbps)`;
-          targetBufferLength = 8;
-          targetMaxBufferLength = 16;
-          maxBufferSizeValue = 8 * 1024 * 1024; // tight 8MB heap to prevent mobile memory pressure crashes
-          backBufferLen = 10; // purge played content immediately to free up RAM
-          syncSettings = {
-            maxBufferHole: 2.0,            // skip structural buffer cracks instead of timing out
-            nudgeMaxRetry: 15,           // keep playhead advancing under spotty feed conditions
-            nudgeOffset: 0.15,             // nudge playhead to bypass black frame stalls
-            highBufferWatchdogPeriod: 2,   // aggressively check A/V drift
-            liveSyncDurationCount: 2,      // pull live streams close to keep sound and frames synced
-          };
-        } else if (type === "3g" || downlink < 4.0) {
-          networkCategory = `Moderate 3G Network (effectiveType: ${type}, speed: ${downlink}Mbps)`;
-          targetBufferLength = 15;
-          targetMaxBufferLength = 30;
-          maxBufferSizeValue = 20 * 1024 * 1024; // 20MB Max
-          backBufferLen = 30;
-          syncSettings = {
-            maxBufferHole: 1.5,
-            nudgeMaxRetry: 10,
-            nudgeOffset: 0.1,
-            highBufferWatchdogPeriod: 3,
-          };
-        } else {
-          networkCategory = `Stable High-Speed Network (${type.toUpperCase()} / ~${downlink} Mbps)`;
-          targetBufferLength = 40;
-          targetMaxBufferLength = 80;
-          maxBufferSizeValue = 65 * 1024 * 1024; // Large 65MB segment stack for silky-smooth seeking/scrubbing
-          backBufferLen = 120; // store back buffer to avoid stutter when repeating content
-          syncSettings = {
-            maxBufferHole: 0.8,
-            nudgeMaxRetry: 5,
-          };
-        }
-      }
-
-      addLog(`Network Optimization: Synced to '${networkCategory}'. Selected buffer threshold = ${targetBufferLength}s, maxBuffer = ${targetMaxBufferLength}s.`, "info");
-
-      let consecutiveMediaErrors = 0;
-
-      const hls = new Hls({
-        enableWorker: true,
-        maxMaxBufferLength: targetMaxBufferLength,
-        maxBufferLength: targetBufferLength,
-        maxBufferSize: maxBufferSizeValue,
-        lowLatencyMode: false,          // stable buffer mode for VOD & stream stability
-        backBufferLength: backBufferLen,
-        
-        // --- SECURE BYPASS CUSTOM HEADERS FOR LIVE / DVR STREAMS ---
-        xhrSetup: (xhr, requestUrl) => {
-          // Look up channel metadata to apply explicit userAgent/referer credentials if defined
-          const matchedChannel = channels.find(c => c.url === url);
-          if (matchedChannel) {
-            if (matchedChannel.userAgent) {
-              try {
-                xhr.setRequestHeader("User-Agent", matchedChannel.userAgent);
-              } catch (err) {
-                console.warn("[AJN] Failed to set User-Agent header:", err);
-              }
-            }
-            if (matchedChannel.referer) {
-              try {
-                xhr.setRequestHeader("Referer", matchedChannel.referer);
-              } catch (err) {
-                console.debug("[AJN] Referer header required but cannot be set client-side:", matchedChannel.referer);
-              }
-            }
-          }
-
-          if (requestUrl.includes("rumble") || requestUrl.includes("chunklist") || requestUrl.includes("bfap-rvuz")) {
-            try {
-              xhr.setRequestHeader("Referer", "https://rumble.com/");
-              xhr.setRequestHeader("Origin", "https://rumble.com");
-            } catch (e) {
-              console.warn("Could not set custom hotlink-bypass headers:", e);
-            }
-          }
-        },
-
-        // --- PROACTIVE STREAM TIMING & EXPONENTIAL BACKOFF RETRY LOGIC ---
-        manifestLoadingMaxRetry: 15,
-        manifestLoadingRetryDelay: 1000,
-        manifestLoadingMaxRetryTimeout: 10000,
-        
-        levelLoadingMaxRetry: 15,
-        levelLoadingRetryDelay: 1000,
-        levelLoadingMaxRetryTimeout: 10000,
-        
-        fragLoadingMaxRetry: 18,
-        fragLoadingRetryDelay: 500,
-        fragLoadingMaxRetryTimeout: 12000,
-        
-        // --- DVR SLIDING WINDOW & ROBUST SEGMENT DELETION HANDLING ---
-        liveSyncDurationCount: 3,       // stay safely 3 segments behind live edge to prevent requesting deleted chunks
-        liveMaxLatencyDurationCount: 8,  // sync back to live edge if lag exceeds 8 chunks
-        liveDurationInfinity: true,      // treat live manifests as dynamic, endless feeds
-        
-        // --- AUDIO/VIDEO TIMING & DECODING ROBUSTNESS ---
-        forceKeyFrameOnDiscontinuity: true, // align keyframes at segment changes to mitigate ADTS AAC codec errors
-        maxBufferHole: 1.5,             // skip segment gaps or decode skips
-        nudgeMaxRetry: 15,            // constantly advance playhead past stalled segments
-        nudgeOffset: 0.1,               // tiny offset nudge past corrupted TS structures
-        highBufferWatchdogPeriod: 3,    // keep audio and video tracks aligned
-        
-        ...syncSettings
-      });
-      hlsRef.current = hls;
-      hls.loadSource(url);
-      hls.attachMedia(video);
-      
-      hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        const savedPos = getSavedVideoPosition(url);
-        if (savedPos > 0) {
-          addLog(`HLS Engine: Seeking automatically to resume point: ${Math.floor(savedPos / 60)}m ${Math.floor(savedPos % 60)}s`, "info");
-          video.currentTime = savedPos;
-        }
-        video.play()
-          .then(() => setPlayerStatus("Playing"))
-          .catch(() => addLog("Awaiting human tap to start play audio"));
-      });
-
-      hls.on(Hls.Events.ERROR, (event, data) => {
-        const errorDetails = `HLS error [details: ${data.details}, type: ${data.type}, fatal: ${data.fatal}]`;
-        
-        if (data.fatal) {
-          switch (data.type) {
-            case Hls.ErrorTypes.NETWORK_ERROR:
-              addLog(`${errorDetails}. Fatal network error - reloading stream pipeline...`, "warning");
-              hls.startLoad();
-              break;
-            case Hls.ErrorTypes.MEDIA_ERROR:
-              consecutiveMediaErrors++;
-              addLog(`${errorDetails}. Fatal media decode error (consecutive count: ${consecutiveMediaErrors}). Attempting recovery...`, "warning");
-              if (consecutiveMediaErrors === 1) {
-                hls.recoverMediaError();
-              } else if (consecutiveMediaErrors === 2) {
-                addLog("Second fatal media error: Swapping audio codecs to resolve Potential AAC-in-MPEG-TS issues...", "warning");
-                hls.swapAudioCodec();
-                hls.recoverMediaError();
-              } else {
-                addLog("Consecutive media errors unresolved: Hard reloading media source engine...", "error");
-                consecutiveMediaErrors = 0;
-                hls.detachMedia();
-                hls.loadSource(url);
-                hls.attachMedia(video);
-              }
-              break;
-            default:
-              addLog(`Unrecoverable fatal HLS error: ${data.details}. Initiating deep direct proxy gateway fallback.`, "error");
-              teardownHlsInstance(hls, video);
-              hlsRef.current = null;
-              handlePlayerError(url, titleStr);
-              break;
-          }
-        } else {
-          // Track and recover warning errors (e.g. keyframe jumps, minor chunk loading stalls, deleted chunks in local sliding index)
-          if (data.details === "fragLoadError" || data.details === "fragLoadTimeOut") {
-            addLog(`Non-fatal warning [${data.details}]: Segment missing/timed out (potentially deleted by sliding DVR). Auto-skipping chunk.`, "warning");
-            if (video && !video.paused) {
-              video.currentTime += 0.5;
-            }
-          } else if (data.details === "bufferStalledError") {
-            addLog("Player buffer stalled on transport segment. Nudging playhead to skip segment freeze.", "warning");
-            if (video) {
-              video.currentTime += 0.25;
-            }
-          }
-        }
-      });
-    } else {
-      addLog("Native Engine: Mounting direct web player source");
-      
-      const onNativeLoaded = () => {
-        const savedPos = getSavedVideoPosition(url);
-        if (savedPos > 0) {
-          addLog(`Native Engine: Seeking automatically to resume point: ${Math.floor(savedPos / 60)}m ${Math.floor(savedPos % 60)}s`, "info");
-          video.currentTime = savedPos;
-        }
-        video.removeEventListener("loadedmetadata", onNativeLoaded);
-      };
-      video.addEventListener("loadedmetadata", onNativeLoaded);
-
-      video.src = url;
-      video.load();
-      video.play()
-        .then(() => setPlayerStatus("Playing"))
-        .catch((e) => {
-          addLog(`Native playback error or interaction restriction: ${e.message}`, "warning");
-          setPlayerStatus("Paused");
-        });
-    }
+    controller.load({ url, title: titleStr, kind: typeToUse });
   };
 
   const playArchiveEpisode = (ep: ArchiveEpisode, index: number) => {
@@ -2013,6 +1866,7 @@ export default function App() {
       addLog("Streaming failed. Modify engine settings or enable Fallback Proxy mode", "error");
     }
   };
+  handlePlayerErrorRef.current = handlePlayerError;
 
   const handleVideoPlayEvent = () => setPlayerStatus("Playing");
   const handleVideoPauseEvent = () => setPlayerStatus("Paused");
@@ -3337,10 +3191,10 @@ export default function App() {
 
                       <button 
                         onClick={() => {
-                          const video = videoRef.current;
-                          if (!video) return;
-                          if (playerStatus === "Playing") video.pause();
-                          else video.play().catch(() => {});
+                          const controller = playbackControllerRef.current;
+                          if (!controller) return;
+                          if (playerStatus === "Playing") controller.pause();
+                          else controller.play().catch(() => {});
                         }}
                         className="p-2.5 cursor-pointer bg-blue-600 hover:bg-blue-500 rounded-full text-white transition-all active:scale-95 shadow-md shadow-blue-900/30"
                       >
@@ -4291,16 +4145,7 @@ export default function App() {
                 <div className="space-y-2 pt-3">
                   <button 
                     onClick={() => {
-                      const video = videoRef.current;
-                      if (video) {
-                        video.pause();
-                        video.src = "";
-                        video.load();
-                      }
-                      if (hlsRef.current) {
-                        hlsRef.current.destroy();
-                        hlsRef.current = null;
-                      }
+                      playbackControllerRef.current?.stop();
                       setCurrentUrl("");
                       setCurrentTitle("No Active Channel");
                       setPlayerStatus("Idle");
