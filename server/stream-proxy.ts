@@ -102,7 +102,7 @@ function requestOnce(
           const selected = family ? addressByFamily.get(family) : addresses[0]?.address;
           const selectedEntry = addresses.find((entry) => entry.address === selected);
           if (!selectedEntry) {
-            callback(new Error("No validated public address available"));
+            callback(new Error("No validated public address available"), "", 0);
             return;
           }
           usedFamily = selectedEntry.family;
@@ -140,7 +140,7 @@ export async function openStreamProxy(
 
   for (let redirect = 0; redirect <= MAX_REDIRECTS; redirect += 1) {
     const validated = validateStreamProxyUrl(currentUrl);
-    if (!validated.ok) {
+    if (validated.ok === false) {
       return { ok: false, status: 400, error: validated.error };
     }
 
