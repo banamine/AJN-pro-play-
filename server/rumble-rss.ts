@@ -8,7 +8,19 @@ export type RumbleRssResult = { ok: true; feedUrl: string; videos: RumbleVideoMe
 function validFeedUrl(raw: string): URL | null { try { const url = new URL(raw); if (url.protocol !== "https:" || url.hostname.toLowerCase() !== "rumble.com") return null; if (!/^\/c\/[^/]+\/feed\/?$/i.test(url.pathname) || url.username || url.password) return null; return url; } catch { return null; } }
 function decodeXml(value: string): string { return value.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, String.fromCharCode(34)).replace(/&apos;/g, String.fromCharCode(39)).replace(/&amp;/g, "&").trim(); }
 function textOf(item: string, tag: string): string { const escaped = tag.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); const match = item.match(new RegExp("<" + escaped + "\\b[^>]*>([\\s\\S]*?)</" + escaped + "\\s*>", "i")); return match ? decodeXml(match[1]) : ""; }
-function attrOf(item: string, tag: string, attribute: string): string { const escapedTag = tag.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); const escapedAttr = attribute.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); const match = item.match(new RegExp("<" + escapedTag + "\\b[^>]*\\b" + escapedAttr + "\\s*=\\s*"([^"]+)"", "i")); return match ? decodeXml(match[1]) : ""; }
+function attrOf(item: string, tag: string, attribute: string): string {
+  const escapedTag = tag.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const escapedAttribute = attribute.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+  const match = item.match(
+    new RegExp(
+      `<${escapedTag}\\b[^>]*\\b${escapedAttribute}\\s*=\\s*[\"']([^\"']*)[\"']`,
+      "i",
+    ),
+  );
+
+  return match ? decodeXml(match[1]) : "";
+}
 function parseItem(item: string): RumbleVideoMetadata | null { const title = textOf(item, "title"); const link = textOf(item, "link") || textOf(item, "guid"); const published = textOf(item, "pubDate") || textOf(item, "published") || textOf(item, "dc:date"); if (!title || !link || !published) return null; let url: URL; try { url = new URL(link); } catch { return null; } if (url.protocol !== "https:" || url.hostname.toLowerCase() !== "rumble.com") return null; const date = new Date(published); if (!Number.isFinite(date.getTime())) return null; const id = url.pathname.match(/\/(?:v|embed\/v)([a-z0-9]+)(?:[-/?]|$)/i)?.[1] ?? ""; if (!id) return null; const thumbnail = attrOf(item, "media:thumbnail", "url") || attrOf(item, "media:content", "url"); let safeThumbnail = ""; try { const t = new URL(thumbnail); if (t.protocol === "https:" && t.hostname.toLowerCase() === "rumble.com") safeThumbnail = t.toString(); } catch {} return { videoId: id, title, embedUrl: url.toString(), publishDate: date.toISOString(), isLive: /\blive\b/i.test(title), thumbnailUrl: safeThumbnail }; }
 export function parseRumbleRss(xml: string): RumbleVideoMetadata[] { if (new TextEncoder().encode(xml).byteLength > MAX_BYTES || /<!DOCTYPE|<!ENTITY|<\?xml-stylesheet/i.test(xml)) return []; if (!/<rss\b[^>]*>[\s\S]*<\/rss>/i.test(xml)) return []; return [...xml.matchAll(/<item\b[^>]*>([\s\S]*?)<\/item\s*>/gi)].slice(0, MAX_ITEMS).map((match) => parseItem(match[1])).filter((item): item is RumbleVideoMetadata => item !== null); }
 async function readBounded(response: Response): Promise<string> { const length = response.headers.get("content-length"); if (length && Number(length) > MAX_BYTES) throw new Error("RSS response exceeds maximum size"); const bytes = new Uint8Array(await response.arrayBuffer()); if (bytes.byteLength > MAX_BYTES) throw new Error("RSS response exceeds maximum size"); return new TextDecoder().decode(bytes); }
