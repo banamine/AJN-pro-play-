@@ -6,6 +6,7 @@ export interface EpgTimelineHeaderProps {
   windowEndEpoch: number;
   pixelsPerMs: number;
   tickMinutes?: number;
+  channelLabelWidth?: number;
 }
 
 function formatTick(epoch: number): string {
@@ -19,7 +20,7 @@ export function EpgTimelineHeader({ windowStartEpoch, windowEndEpoch, pixelsPerM
   const ticks: number[] = [];
   for (let tick = firstTick; tick < windowEndEpoch; tick += tickMs) ticks.push(tick);
 
-  return <div className="relative h-9 border-b border-slate-800/70 bg-[#070a0f]" aria-label="EPG timeline" data-epg-timeline-header="v1" style={{ width: getTimelineWidth(window, pixelsPerMs) }}>
-    {ticks.map((tick) => <div key={tick} className="absolute inset-y-0 border-l border-slate-800/70 pl-2 pt-2 text-[9px] font-bold tracking-wide text-slate-500" style={{ left: (tick - windowStartEpoch) * pixelsPerMs }}>{formatTick(tick)}</div>)}
+  return <div className="relative h-9 border-b border-slate-800/70 bg-[#070a0f]" aria-label="EPG timeline" data-epg-timeline-header="v1" style={{ width: channelLabelWidth + getTimelineWidth(window, pixelsPerMs) }}>
+    {ticks.map((tick) => <div key={tick} className="absolute inset-y-0 border-l border-slate-800/70 pl-2 pt-2 text-[9px] font-bold tracking-wide text-slate-500" style={{ left: channelLabelWidth + (tick - windowStartEpoch) * pixelsPerMs }}>{formatTick(tick)}</div>)}
   </div>;
 }
