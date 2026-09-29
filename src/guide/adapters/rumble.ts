@@ -1,5 +1,5 @@
-import type { EpgChannelSchedule, EpgProgram } from "../../types/guide";
-import type { RumbleSyncChannelState } from "../../types/rumble";
+import type { EpgChannelSchedule, EpgProgram } from "../../../types/guide";
+import type { RumbleSyncChannelState } from "../../../types/rumble";
 import type { RumbleVideoItem } from "../../types/rumble";
 
 /** Default duration for VOD items when no subsequent program exists (30 minutes in ms). */
