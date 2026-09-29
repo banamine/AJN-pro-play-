@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -16,6 +17,11 @@ export interface EpgChannel {
   id: string;
   title?: string;
   schedule: EpgChannelSchedule;
+}
+
+export interface EpgFocusCoordinate {
+  channelId: string;
+  programId: string;
 }
 
 export interface EpgContainerProps {
@@ -38,6 +44,18 @@ const DEFAULT_ROW_HEIGHT = 64;
 const DEFAULT_OVERSCAN_ROWS = 4;
 const CHANNEL_LABEL_WIDTH = 160;
 
+function firstProgramCoordinate(
+  channels: EpgChannel[],
+): EpgFocusCoordinate | null {
+  for (const channel of channels) {
+    const program = channel.schedule.programs[0];
+    if (program) {
+      return { channelId: channel.id, programId: program.id };
+    }
+  }
+  return null;
+}
+
 export function EpgContainer({
   channels,
   windowStartEpoch,
@@ -53,10 +71,12 @@ export function EpgContainer({
   overscanRows = DEFAULT_OVERSCAN_ROWS,
 }: EpgContainerProps) {
   const [scrollTop, setScrollTop] = useState(0);
-  const [focusedCell, setFocusedCell] = useState({ row: 0, column: 0 });
+  const [focusedCoordinate, setFocusedCoordinate] =
+    useState<EpgFocusCoordinate | null>(() => firstProgramCoordinate(channels));
   const horizontalScrollRef = useRef<HTMLDivElement | null>(null);
   const verticalScrollRef = useRef<HTMLDivElement | null>(null);
   const rootRef = useRef<HTMLElement | null>(null);
+  const pendingFocusRef = useRef<EpgFocusCoordinate | null>(null);
 
   const window: TimelineWindow = useMemo(
     () => ({ windowStartEpoch, windowEndEpoch }),
@@ -94,40 +114,86 @@ export function EpgContainer({
   );
   const timelineWidth = getTimelineWidth(window, pixelsPerMs);
 
-  const focusCell = useCallback(
-    (row: number, column: number) => {
-      const rowCount = visibleProgramsByChannel.length;
-      if (rowCount === 0) return;
-
-      let nextRow = Math.max(0, Math.min(rowCount - 1, row));
-      let programs = visibleProgramsByChannel[nextRow]?.programs ?? [];
-
-      if (programs.length === 0) {
-        const direction = row >= focusedCell.row ? 1 : -1;
-        while (nextRow >= 0 && nextRow < rowCount) {
-          nextRow += direction;
-          programs = visibleProgramsByChannel[nextRow]?.programs ?? [];
-          if (programs.length > 0) break;
-        }
-      }
-
-      if (programs.length === 0) return;
-
-      const nextColumn = Math.max(0, Math.min(programs.length - 1, column));
-      setFocusedCell({ row: nextRow, column: nextColumn });
-
-      const target = programs[nextColumn];
-      requestAnimationFrame(() => {
-        const selector = '[data-epg-program-id="' +
-          target.id.replace(/"/g, '\\"') +
-          '"]';
-        const element = rootRef.current?.querySelector<HTMLElement>(selector);
-        element?.scrollIntoView({ block: "nearest", inline: "nearest" });
-      });
+  const resolveCoordinate = useCallback(
+    (coordinate: EpgFocusCoordinate | null) => {
+      if (!coordinate) return null;
+      const channelIndex = channels.findIndex(
+        (channel) => channel.id === coordinate.channelId,
+      );
+      if (channelIndex < 0) return null;
+      const programs = visibleProgramsByChannel[channelIndex]?.programs ?? [];
+      const programIndex = programs.findIndex(
+        (program) => program.id === coordinate.programId,
+      );
+      if (programIndex < 0) return null;
+      return { channelIndex, programIndex, program: programs[programIndex] };
     },
-    [focusedCell.row, visibleProgramsByChannel],
+    [channels, visibleProgramsByChannel],
   );
 
+  const scrollToIndex = useCallback(
+    (channelIndex: number) => {
+      const verticalScroll = verticalScrollRef.current;
+      if (!verticalScroll) return;
+      const targetTop = channelIndex * rowHeight;
+      const maxTop = Math.max(
+        0,
+        verticalScroll.scrollHeight - verticalScroll.clientHeight,
+      );
+      const nextTop = Math.min(Math.max(0, targetTop), maxTop);
+      verticalScroll.scrollTop = nextTop;
+      setScrollTop(nextTop);
+    },
+    [rowHeight],
+  );
+
+  const focusCoordinate = useCallback(
+    (coordinate: EpgFocusCoordinate | null) => {
+      if (!coordinate) return;
+
+      const resolved = resolveCoordinate(coordinate);
+      if (!resolved) return;
+
+      pendingFocusRef.current = coordinate;
+      scrollToIndex(resolved.channelIndex);
+      setFocusedCoordinate(coordinate);
+    },
+    [resolveCoordinate, scrollToIndex],
+  );
+
+  useLayoutEffect(() => {
+    const coordinate = pendingFocusRef.current;
+    if (!coordinate) return;
+
+    const target = rootRef.current?.querySelector<HTMLElement>(
+      '[data-epg-program-id="' +
+        coordinate.programId.replace(/"/g, '\\"') +
+        '"]',
+    );
+
+    if (!target) return;
+
+    target.focus();
+    pendingFocusRef.current = null;
+  }, [focusedCoordinate, firstVisible, visibleChannels]);
+
+  useEffect(() => {
+    if (!focusedCoordinate) {
+      setFocusedCoordinate(firstProgramCoordinate(channels));
+      return;
+    }
+
+    const channel = channels.find(
+      (candidate) => candidate.id === focusedCoordinate.channelId,
+    );
+    const program = channel?.schedule.programs.find(
+      (candidate) => candidate.id === focusedCoordinate.programId,
+    );
+
+    if (!channel || !program) {
+      setFocusedCoordinate(firstProgramCoordinate(channels));
+    }
+  }, [channels, focusedCoordinate]);
 
   useEffect(() => {
     if (!activeChannelId) return;
@@ -137,16 +203,7 @@ export function EpgContainer({
     );
     if (channelIndex < 0) return;
 
-    const verticalScroll = verticalScrollRef.current;
-    if (verticalScroll) {
-      const targetTop = channelIndex * rowHeight;
-      const maxTop = Math.max(
-        0,
-        verticalScroll.scrollHeight - verticalScroll.clientHeight,
-      );
-      verticalScroll.scrollTop = Math.min(targetTop, maxTop);
-      setScrollTop(verticalScroll.scrollTop);
-    }
+    scrollToIndex(channelIndex);
 
     const horizontalScroll = horizontalScrollRef.current;
     if (!horizontalScroll) return;
@@ -168,12 +225,89 @@ export function EpgContainer({
   }, [
     activeChannelId,
     channels,
-    rowHeight,
     pixelsPerMs,
+    rowHeight,
+    scrollToIndex,
     timeProvider,
-    windowStartEpoch,
     windowEndEpoch,
+    windowStartEpoch,
   ]);
+
+  const moveFocus = useCallback(
+    (direction: "up" | "down" | "left" | "right") => {
+      const current = focusedCoordinate ?? firstProgramCoordinate(channels);
+      if (!current) return;
+
+      const currentChannelIndex = channels.findIndex(
+        (channel) => channel.id === current.channelId,
+      );
+      if (currentChannelIndex < 0) return;
+
+      const currentPrograms =
+        visibleProgramsByChannel[currentChannelIndex]?.programs ?? [];
+      const currentProgramIndex = currentPrograms.findIndex(
+        (program) => program.id === current.programId,
+      );
+      if (currentProgramIndex < 0) return;
+
+      let nextChannelIndex = currentChannelIndex;
+      let nextProgramIndex = currentProgramIndex;
+
+      if (direction === "left") nextProgramIndex -= 1;
+      if (direction === "right") nextProgramIndex += 1;
+      if (direction === "up") nextChannelIndex -= 1;
+      if (direction === "down") nextChannelIndex += 1;
+
+      if (
+        nextChannelIndex < 0 ||
+        nextChannelIndex >= visibleProgramsByChannel.length
+      ) {
+        onFocusBoundary?.(direction);
+        return;
+      }
+
+      let nextPrograms =
+        visibleProgramsByChannel[nextChannelIndex]?.programs ?? [];
+
+      if (nextPrograms.length === 0) {
+        const step = direction === "up" ? -1 : 1;
+        if (direction === "left" || direction === "right") return;
+        while (
+          nextChannelIndex >= 0 &&
+          nextChannelIndex < visibleProgramsByChannel.length
+        ) {
+          nextChannelIndex += step;
+          nextPrograms =
+            visibleProgramsByChannel[nextChannelIndex]?.programs ?? [];
+          if (nextPrograms.length > 0) break;
+        }
+      }
+
+      if (nextPrograms.length === 0) return;
+
+      nextProgramIndex = Math.max(
+        0,
+        Math.min(nextPrograms.length - 1, nextProgramIndex),
+      );
+
+      const nextProgram = nextPrograms[nextProgramIndex];
+      if (!nextProgram) return;
+
+      const nextCoordinate: EpgFocusCoordinate = {
+        channelId: nextProgram.channelId,
+        programId: nextProgram.id,
+      };
+
+      focusCoordinate(nextCoordinate);
+    },
+    [
+      channels,
+      focusCoordinate,
+      focusedCoordinate,
+      onFocusBoundary,
+      visibleProgramsByChannel,
+    ],
+  );
 
   const handleKeyDown = (event: KeyboardEvent<HTMLElement>) => {
     if (!isFocusRegionActive) return;
@@ -188,66 +322,35 @@ export function EpgContainer({
 
     if (direction) {
       event.preventDefault();
-
-      const row = focusedCell.row;
-      const column = focusedCell.column;
-      const programs = visibleProgramsByChannel[row]?.programs ?? [];
-
-      if (direction === "left" && column === 0) {
-        onFocusBoundary?.("left");
-        return;
-      }
-      if (
-        direction === "right" &&
-        programs.length > 0 &&
-        column >= programs.length - 1
-      ) {
-        onFocusBoundary?.("right");
-        return;
-      }
-      if (direction === "up" && row === 0) {
-        onFocusBoundary?.("up");
-        return;
-      }
-      if (
-        direction === "down" &&
-        row >= visibleProgramsByChannel.length - 1
-      ) {
-        onFocusBoundary?.("down");
-        return;
-      }
-
-      if (direction === "left") focusCell(row, column - 1);
-      if (direction === "right") focusCell(row, column + 1);
-      if (direction === "up") focusCell(row - 1, column);
-      if (direction === "down") focusCell(row + 1, column);
+      event.stopPropagation();
+      moveFocus(direction);
       return;
     }
 
     if (event.key === "Enter") {
-      const programs = visibleProgramsByChannel[focusedCell.row]?.programs ?? [];
-      const program = programs[focusedCell.column];
-      if (!program) return;
+      const resolved = resolveCoordinate(focusedCoordinate);
+      if (!resolved) return;
 
       event.preventDefault();
-      const schedule = channels[focusedCell.row]?.schedule;
+      event.stopPropagation();
+
+      const schedule = channels[resolved.channelIndex]?.schedule;
       if (!schedule) return;
 
-      const current = schedule.programs.find((candidate) => {
-        const now = timeProvider.now();
-        return (
+      const now = timeProvider.now();
+      const current = schedule.programs.find(
+        (candidate) =>
           candidate.startTime <= now &&
-          (candidate.endTime === null || now < candidate.endTime)
-        );
-      });
+          (candidate.endTime === null || now < candidate.endTime),
+      );
 
       onSelectProgram({
-        channelId: program.channelId,
-        program,
-        isCurrentlyLive: current?.id === program.id,
+        channelId: resolved.program.channelId,
+        program: resolved.program,
+        isCurrentlyLive: current?.id === resolved.program.id,
         embedUrl:
-          typeof program.sourceMetadata?.embedUrl === "string"
-            ? program.sourceMetadata.embedUrl
+          typeof resolved.program.sourceMetadata?.embedUrl === "string"
+            ? resolved.program.sourceMetadata.embedUrl
             : undefined,
       });
       return;
@@ -255,6 +358,8 @@ export function EpgContainer({
 
     if (event.key === "Escape") {
       event.preventDefault();
+      event.stopPropagation();
+      pendingFocusRef.current = null;
       onFocusBoundary?.("up");
     }
   };
@@ -298,12 +403,9 @@ export function EpgContainer({
                 }}
               >
                 {visibleChannels.map((channel) => {
-                  const channelIndex = channels.indexOf(channel);
-                  const focusedRow = focusedCell.row === channelIndex;
-                  const focusedPrograms =
-                    visibleProgramsByChannel[channelIndex]?.programs ?? [];
+                  const focusedRow = focusedCoordinate?.channelId === channel.id;
                   const focusedProgramId = focusedRow
-                    ? focusedPrograms[focusedCell.column]?.id ?? null
+                    ? focusedCoordinate?.programId ?? null
                     : null;
 
                   return (

@@ -4,7 +4,7 @@ import {
   useRef,
   useState,
 } from "react";
-import type { EpgProgram, TimeProvider } from "../../../types/guide";
+import type { TimeProvider } from "../../../types/guide";
 import { adaptRumbleStateToEpgSchedule } from "../../guide/adapters/rumble";
 import type { RumbleSyncChannelState } from "../../rumble/sync-circuit-breaker.ts";
 import {
@@ -23,6 +23,14 @@ import { RumblePlayerContainer } from "./RumblePlayerContainer.tsx";
 import { isRumbleFallbackState } from "./station-model.ts";
 
 const GUIDE_WINDOW_MS = 4 * 60 * 60 * 1000;
+const Z_INDEX = {
+  base: "z-0",
+  header: "z-10",
+  pip: "z-30",
+  backdrop: "z-40",
+  modal: "z-50",
+  focus: "z-60",
+} as const;
 
 export interface RumbleTVStationViewProps {
   channels: RumbleSyncChannelState[];
@@ -41,38 +49,61 @@ function PreviewDrawer({
   program,
   onClose,
 }: {
-  program: EpgProgram;
+  program: import("../../../types/guide").EpgProgram;
   onClose: () => void;
 }) {
   return (
-    <aside
-      className="rounded-2xl border border-slate-800/70 bg-[#080b10] p-4 shadow-xl"
-      aria-label="Program preview"
-      data-epg-preview="v1"
+    <div
+      className="fixed inset-0 flex items-end justify-center p-4"
+      role="presentation"
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          event.stopPropagation();
+          onClose();
+        }
+      }}
+      data-epg-preview="v2"
     >
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <div className="text-[9px] font-black uppercase tracking-[0.2em] text-blue-400">
-            Program preview
+      <div
+        aria-hidden="true"
+        className={Z_INDEX.backdrop + " absolute inset-0 bg-black/70"}
+        onClick={onClose}
+      />
+      <aside
+        role="dialog"
+        aria-modal="true"
+        aria-label="Program preview"
+        tabIndex={-1}
+        className={
+          Z_INDEX.modal +
+          " relative w-full max-w-xl rounded-2xl border border-slate-800/70 bg-[#080b10] p-4 shadow-xl"
+        }
+      >
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <div className="text-[9px] font-black uppercase tracking-[0.2em] text-blue-400">
+              Program preview
+            </div>
+            <h3 className="mt-1 text-sm font-bold text-white">{program.title}</h3>
           </div>
-          <h3 className="mt-1 text-sm font-bold text-white">{program.title}</h3>
+          <button
+            type="button"
+            onClick={onClose}
+            className="shrink-0 rounded-lg border border-slate-700 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400 hover:text-white"
+            aria-label="Close program preview"
+          >
+            Close
+          </button>
         </div>
-        <button
-          type="button"
-          onClick={onClose}
-          className="shrink-0 rounded-lg border border-slate-700 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400 hover:text-white"
-          aria-label="Close program preview"
-        >
-          Close
-        </button>
-      </div>
-      <div className="mt-3 text-[10px] font-mono text-slate-500">
-        Starts {formatProgramStart(program.startTime)}
-      </div>
-      <p className="mt-3 text-xs leading-relaxed text-slate-300">
-        {program.description || "No synopsis is available for this program."}
-      </p>
-    </aside>
+        <div className="mt-3 text-[10px] font-mono text-slate-500">
+          Starts {formatProgramStart(program.startTime)}
+        </div>
+        <p className="mt-3 text-xs leading-relaxed text-slate-300">
+          {program.description || "No synopsis is available for this program."}
+        </p>
+      </aside>
+    </div>
   );
 }
 
@@ -81,7 +112,10 @@ export function RumbleTVStationView({
   activeChannelId,
   onSelectChannel,
 }: RumbleTVStationViewProps) {
-  const [previewProgram, setPreviewProgram] = useState<EpgProgram | null>(null);
+  const [previewKey, setPreviewKey] = useState<{
+    channelId: string;
+    programId: string;
+  } | null>(null);
   const [isPinned, setIsPinned] = useState(false);
   const [activeFocusRegion, setActiveFocusRegion] =
     useState<FocusRegion>("carousel");
@@ -113,6 +147,17 @@ export function RumbleTVStationView({
       })),
     [channels, timeProvider],
   );
+
+  const activePreviewProgram = useMemo(() => {
+    if (!previewKey) return null;
+    const schedule = epgChannels.find(
+      (channel) => channel.id === previewKey.channelId,
+    )?.schedule;
+    return (
+      schedule?.programs.find((program) => program.id === previewKey.programId) ??
+      null
+    );
+  }, [epgChannels, previewKey]);
 
   useEffect(() => {
     const anchor = playerAnchorRef.current;
@@ -146,8 +191,9 @@ export function RumbleTVStationView({
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
+        if (event.defaultPrevented) return;
         event.preventDefault();
-        focusRegion("carousel");
+        focusRegion("player");
         return;
       }
 
@@ -177,17 +223,20 @@ export function RumbleTVStationView({
 
   const handleProgramSelect = (event: EpgProgramSelectEvent) => {
     if (event.isCurrentlyLive) {
-      setPreviewProgram(null);
+      setPreviewKey(null);
       onSelectChannel(event.channelId);
       return;
     }
 
-    setPreviewProgram(event.program);
+    setPreviewKey({
+      channelId: event.channelId,
+      programId: event.program.id,
+    });
   };
 
   return (
     <div
-      className="flex w-full flex-col gap-3 overflow-hidden"
+      className="relative flex w-full flex-col gap-3 overflow-hidden"
       data-rumble-tv-station="v3"
       onFocusCapture={(event) => {
         const target = event.target as HTMLElement;
@@ -204,7 +253,7 @@ export function RumbleTVStationView({
         channels={channels}
         activeChannelId={activeChannel.id}
         onSelectChannel={(channelId) => {
-          setPreviewProgram(null);
+          setPreviewKey(null);
           onSelectChannel(channelId);
         }}
       />
@@ -224,8 +273,8 @@ export function RumbleTVStationView({
 
       <RumbleMetadataOverlay channel={activeChannel} />
 
-      <div className="min-h-0 overflow-hidden rounded-2xl border border-slate-800/70 bg-[#05070a]">
-        <div className="flex items-center justify-between gap-3 border-b border-slate-800/70 bg-[#080b10] px-4 py-3">
+      <div className={Z_INDEX.base + " min-h-0 overflow-hidden rounded-2xl border border-slate-800/70 bg-[#05070a]"}>
+        <div className={Z_INDEX.header + " flex items-center justify-between gap-3 border-b border-slate-800/70 bg-[#080b10] px-4 py-3"}>
           <div>
             <div className="text-[9px] font-black uppercase tracking-[0.2em] text-blue-400">
               Live Guide
@@ -251,21 +300,17 @@ export function RumbleTVStationView({
               if (direction === "up") focusRegion("player");
             }}
             onSelectChannel={(channelId) => {
-              setPreviewProgram(null);
+              setPreviewKey(null);
               onSelectChannel(channelId);
             }}
             onSelectProgram={handleProgramSelect}
           />
         </div>
 
-        {previewProgram && (
-          <div className="p-2 pt-0">
-            <PreviewDrawer
-              program={previewProgram}
-              onClose={() => setPreviewProgram(null)}
-            />
-          </div>
-        )}
+        {activePreviewProgram && <PreviewDrawer
+          program={activePreviewProgram}
+          onClose={() => setPreviewKey(null)}
+        />}
       </div>
     </div>
   );

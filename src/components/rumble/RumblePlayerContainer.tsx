@@ -21,7 +21,13 @@ export const RumblePlayerContainer = memo(function RumblePlayerContainer({
       className={getPlayerViewportClassName(isPinned)}
       aria-label={channelTitle + " Rumble player"}
       data-rumble-player-container="v2"
+      data-focus-region="player"
     >
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 z-10"
+        data-rumble-focus-shield="v1"
+      />
       <RumbleIframe embedUrl={activeEmbedUrl} className="rounded-[28px]" />
 
       {fallback && (
