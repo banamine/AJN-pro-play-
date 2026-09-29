@@ -14,11 +14,9 @@ export function teardownHlsInstance(
   hls: HlsLifecycleAdapter | null | undefined,
   video?: MediaElementAdapter | null
 ): void {
-  if (!hls) return;
-
-  hls.stopLoad?.();
-  hls.detachMedia?.();
-  hls.destroy?.();
+  hls?.stopLoad?.();
+  hls?.detachMedia?.();
+  hls?.destroy?.();
 
   video?.pause?.();
   video?.removeAttribute?.('src');
