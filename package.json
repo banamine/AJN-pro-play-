@@ -12,7 +12,8 @@
     "start": "node dist/server.cjs",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
-    "test": "node --test --test-reporter spec tests/**/*.test.cjs"
+    "test": "npm run build:test-modules && node --test --test-reporter spec tests/**/*.test.cjs",
+    "build:test-modules": "esbuild server/stream-url.ts src/playback/hls-lifecycle.ts --format=cjs --platform=node --outdir=dist/test-modules"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
