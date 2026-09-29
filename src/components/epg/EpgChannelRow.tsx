@@ -1,10 +1,11 @@
+import type { Key } from "react";
 import type { EpgChannelSchedule, EpgProgram, TimeProvider } from "../../../types/guide";
 import { projectChannelSchedule } from "../../guide/projection";
 import { EpgProgramTile } from "./EpgProgramTile";
 import { getVisiblePrograms, type TimelineWindow } from "./timeline-geometry";
 
 export interface EpgProgramSelectEvent { channelId: string; program: EpgProgram; isCurrentlyLive: boolean; embedUrl?: string; }
-export interface EpgChannelRowProps { schedule: EpgChannelSchedule; channelTitle?: string; window: TimelineWindow; pixelsPerMs: number; rowHeight: number; timeProvider: TimeProvider; onSelectProgram: (event: EpgProgramSelectEvent) => void; }
+export interface EpgChannelRowProps { key?: Key; schedule: EpgChannelSchedule; channelTitle?: string; window: TimelineWindow; pixelsPerMs: number; rowHeight: number; timeProvider: TimeProvider; onSelectProgram: (event: EpgProgramSelectEvent) => void; }
 
 export function EpgChannelRow({ schedule, channelTitle, window, pixelsPerMs, rowHeight, timeProvider, onSelectProgram }: EpgChannelRowProps) {
   const visiblePrograms = getVisiblePrograms(schedule.programs, window);
