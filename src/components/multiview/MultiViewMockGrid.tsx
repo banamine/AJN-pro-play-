@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo } from "react";
-import type { MultiViewPattern, TileId } from "../../types/multiview";
+import type { MultiViewPattern, MultiViewSource, TileId } from "../../types/multiview";
 import { useMultiViewManager } from "../../multiview/useMultiViewManager";
 import { useAudioArbitrator } from "../../multiview/useAudioArbitrator";
 import { useResourceGovernor } from "../../multiview/useResourceGovernor";
@@ -10,6 +10,8 @@ const CHANNELS = [
   { id: "vod-1", title: "VOD", category: "vod" as const },
   { id: "ajn-1", title: "AJN Shows", category: "ajn" as const },
 ];
+const SOURCES: MultiViewSource[] = CHANNELS.map((channel) => ({ channelId: channel.id, sourceType: channel.category === "vod" ? "mp4" : channel.category === "news" ? "hls" : channel.category === "ajn" ? "iframe" : "hls", sourceUrl: "https://example.test/" + channel.id, hasVideoTrack: true }));
+
 const DEFAULT_PATTERN: MultiViewPattern = {
   id: "default-quartet", name: "Default Quartet", layout: "2x2",
   panels: CHANNELS.map((channel, index) => ({ instanceId: ("tile-" + index) as TileId, category: channel.category, channelId: channel.id, enabled: true })),
@@ -18,7 +20,7 @@ export function MultiViewMockGrid() {
   const manager = useMultiViewManager(DEFAULT_PATTERN);
   const navigation = useSpatialNavigation();
   const audio = useAudioArbitrator(navigation.focusedTileId);
-  const resources = useResourceGovernor(navigation.focusedTileId, manager.panels);
+  const resources = useResourceGovernor(navigation.focusedTileId, manager.panels, SOURCES);
   useEffect(() => { audio.syncAudioWithSpatialFocus(navigation.focusedTileId); }, [navigation.focusedTileId, audio.syncAudioWithSpatialFocus]);
   const focusedPanel = manager.panels.find((panel) => panel.instanceId === navigation.focusedTileId);
   const menuChannels = useMemo(() => CHANNELS.filter((channel) => channel.category === focusedPanel?.category), [focusedPanel?.category]);
