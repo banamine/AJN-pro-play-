@@ -32,5 +32,5 @@ export function EpgNowIndicator({ windowStartEpoch, windowEndEpoch, pixelsPerMs,
     return () => window.cancelAnimationFrame(frame);
   }, []);
 
-  return <div ref={indicatorRef} className="pointer-events-none absolute inset-y-0 left-0 z-30 w-px bg-rose-400 shadow-[0_0_10px_rgba(251,113,133,0.7)]" aria-label="Current time" data-epg-now-indicator="v1" style={{ visibility: "hidden" }}><span className="absolute -left-2 top-0 h-2 w-2 rounded-full bg-rose-400" /></div>;
+  return <div ref={indicatorRef} className="pointer-events-none absolute inset-y-0 left-0 z-30 w-px bg-rose-400 shadow-[0_0_10px_rgba(251,113,133,0.7)]" aria-label="Current time" data-epg-now-indicator="v1" style={{ visibility: "hidden", marginLeft: channelLabelWidth }}><span className="absolute -left-2 top-0 h-2 w-2 rounded-full bg-rose-400" /></div>;
 }
