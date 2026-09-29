@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { teardownHlsInstance } = require('../dist/src/playback/hls-lifecycle.cjs');
+const { teardownHlsInstance } = require('../dist/test-modules/hls-lifecycle.cjs');
 
 test('teardown stops loading, detaches media, destroys HLS, then clears media', () => {
   const calls = [];
