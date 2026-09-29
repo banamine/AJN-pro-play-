@@ -122,7 +122,7 @@ async function startServer() {
     }
 
     const validated = validateStreamProxyUrl(rawUrl);
-    if (!validated.ok) {
+    if (validated.ok === false) {
       return res.status(400).json({ error: validated.error });
     }
 
