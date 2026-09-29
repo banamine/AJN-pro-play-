@@ -225,6 +225,6 @@ test("unrecoverable HLS errors hand off to the application fallback callback", (
   harness.emit(EVENTS.ERROR, { fatal: true, type: "unrecoverable", details: "fatalStreamError" });
 
   assert.equal(fatalSource.title, "Live");
-  assert.equal(fatalMessage, "HLS error [details: fatalStreamError, type: unrecoverable, fatal: true]");
+  assert.equal(fatalMessage, "HLS fatal error: fatalStreamError");
   assert.equal(controller.getState().status, "error");
 });
