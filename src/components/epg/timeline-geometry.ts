@@ -1,4 +1,4 @@
-import type { EpgProgram } from "../../types/guide";
+import type { EpgProgram } from "../../../types/guide";
 
 export interface TimelineWindow { windowStartEpoch: number; windowEndEpoch: number; }
 export interface ProgramGeometry { leftPx: number; widthPx: number; effectiveStart: number; effectiveEnd: number; }
