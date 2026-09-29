@@ -3,7 +3,9 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "dev": "tsx server.ts",
     "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
@@ -11,7 +13,7 @@
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
     "test": "npm run build:test-modules && node --test --test-reporter spec tests/**/*.test.cjs",
-    "build:test-modules": "esbuild server/stream-url.ts --format=cjs --platform=node --outfile=dist/test-modules/stream-url.cjs && esbuild server/stream-proxy.ts --format=cjs --platform=node --outfile=dist/test-modules/stream-proxy.cjs --bundle && esbuild src/playback/hls-lifecycle.ts --format=cjs --platform=node --outfile=dist/test-modules/hls-lifecycle.cjs && esbuild src/playback/playback-controller.ts --format=cjs --platform=node --outfile=dist/test-modules/playback-controller.cjs --bundle && esbuild server/rumble-rss.ts --format=cjs --platform=node --outfile=dist/test-modules/rumble-rss.cjs"
+    "build:test-modules": "esbuild server/stream-url.ts --format=cjs --platform=node --outfile=dist/test-modules/stream-url.cjs && esbuild server/stream-proxy.ts --format=cjs --platform=node --outfile=dist/test-modules/stream-proxy.cjs --bundle && esbuild src/playback/hls-lifecycle.ts --format=cjs --platform=node --outfile=dist/test-modules/hls-lifecycle.cjs && esbuild src/playback/playback-controller.ts --format=cjs --platform=node --outfile=dist/test-modules/playback-controller.cjs --bundle && esbuild server/rumble-rss.ts --format=cjs --platform=node --outfile=dist/test-modules/rumble-rss.cjs && esbuild src/playback/rumble-iframe-lifecycle.ts --format=cjs --platform=node --outfile=dist/test-modules/rumble-iframe-lifecycle.cjs"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

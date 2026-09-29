@@ -36,6 +36,7 @@ import {
   Share2
 } from "lucide-react";
 import { PlaybackController } from "./playback/playback-controller.ts";
+import { RumbleIframe } from "./components/RumbleIframe.tsx";
 import { motion, AnimatePresence } from "motion/react";
 import { IPTVChannel, PlaybackHistoryItem, ArchiveEpisode, ColorScheme } from "./types";
 import { buildM3U, buildWeeblyHtml, triggerClientDownload, buildLanguageSeparatedM3U, detectLanguage, buildTVExplorerHtml, buildVidGridHtml, buildPublicIPTVHtml, ExportEpisode } from "./utils/exportUtils";
@@ -3106,13 +3107,9 @@ export default function App() {
                       referrerPolicy="no-referrer"
                     />
                   ) : isRumbleUrl(currentUrl) ? (
-                    <iframe
-                      id="rumble-embed-node"
-                      src={getRumbleEmbedUrl(currentUrl)}
-                      className="w-full h-full border-0 absolute inset-0 bg-black rounded-[32px] z-10"
-                      allowFullScreen
-                      allow="autoplay; encrypted-media; picture-in-picture"
-                      referrerPolicy="no-referrer"
+                    <RumbleIframe
+                      embedUrl={getRumbleEmbedUrl(currentUrl)}
+                      className="rounded-[32px] z-10"
                     />
                   ) : (
                     <video
