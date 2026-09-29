@@ -27,3 +27,4 @@ jobs:
           git diff --cached --quiet && exit 0
           git commit -m "chore: add package lockfile"
           git push
+# one-shot generation helper for the Phase 3 branch
