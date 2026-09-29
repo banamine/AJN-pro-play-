@@ -1,7 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const { validateStreamProxyUrl } = require("../dist/server/stream-url.cjs");
+const { validateStreamProxyUrl } = require("../dist/test-modules/stream-url.cjs");
 
 test("accepts a public HTTPS stream URL", () => {
   assert.deepEqual(
