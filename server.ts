@@ -1,7 +1,7 @@
 import express from "express";
 import path from "path";
 import { Readable } from "stream";
-import { validateStreamProxyUrl } from "./server/stream-url";
+import { validateStreamProxyUrl } from "./server/stream-url.ts";
 
 async function startServer() {
   const app = express();
