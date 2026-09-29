@@ -18,6 +18,11 @@ export type StreamProxyResult =
     }
   | { ok: false; status: number; error: string };
 
+export interface StreamProxyDependencies {
+  lookup?: typeof dns.lookup;
+  isPublicAddress?: typeof isPublicAddress;
+}
+
 const REQUEST_TIMEOUT_MS = 15_000;
 const MAX_REDIRECTS = 5;
 
@@ -40,8 +45,81 @@ function isBlockedIpv4(hostname: string): boolean {
   );
 }
 
+function ipv6ToBigInt(address: string): bigint | null {
+  const normalized = address.toLowerCase();
+  const zoneIndex = normalized.indexOf("%");
+  const withoutZone = zoneIndex >= 0 ? normalized.slice(0, zoneIndex) : normalized;
+  const [head, tail] = withoutZone.split("::");
+
+  if (tail !== undefined && withoutZone.indexOf("::") !== withoutZone.lastIndexOf("::")) {
+    return null;
+  }
+
+  const parsePart = (part: string): number[] | null => {
+    if (!part) return [];
+
+    if (part.includes(".")) {
+      const ipv4 = part.split(".");
+      if (
+        ipv4.length !== 4 ||
+        ipv4.some((octet) => !/^\d+$/.test(octet) || Number(octet) < 0 || Number(octet) > 255)
+      ) {
+        return null;
+      }
+      const value =
+        (Number(ipv4[0]) << 24) |
+        (Number(ipv4[1]) << 16) |
+        (Number(ipv4[2]) << 8) |
+        Number(ipv4[3]);
+      return [(value >>> 16) & 0xffff, value & 0xffff];
+    }
+
+    if (!/^[0-9a-f]{1,4}$/.test(part)) return null;
+    return [Number.parseInt(part, 16)];
+  };
+
+  const headParts = head.split(":").flatMap(parsePart);
+  const tailParts = tail === undefined ? [] : tail.split(":").flatMap(parsePart);
+  if (headParts.length === 0 && tailParts.length === 0 && withoutZone !== "::") return null;
+  if (headParts.length + tailParts.length > 8) return null;
+
+  const groups =
+    tail === undefined
+      ? headParts
+      : [...headParts, ...Array(8 - headParts.length - tailParts.length).fill(0), ...tailParts];
+
+  if (groups.length !== 8) return null;
+
+  return groups.reduce((value, group) => (value << 16n) | BigInt(group), 0n);
+}
+
+function embeddedIpv4FromIpv6(address: string): string | null {
+  const value = ipv6ToBigInt(address);
+  if (value === null) return null;
+
+  const top32 = value >> 96n;
+  const top16 = value >> 112n;
+
+  if (top32 === 0xffffn || top32 === 0x64ff9bn || top16 === 0x2002n) {
+    const ipv4Value = Number(value & 0xffffffffn);
+    return [
+      (ipv4Value >>> 24) & 255,
+      (ipv4Value >>> 16) & 255,
+      (ipv4Value >>> 8) & 255,
+      ipv4Value & 255,
+    ].join(".");
+  }
+
+  return null;
+}
+
 function isBlockedIpv6(hostname: string): boolean {
   const normalized = hostname.toLowerCase();
+  const embeddedIpv4 = embeddedIpv4FromIpv6(normalized);
+  if (embeddedIpv4 !== null && isBlockedIpv4(embeddedIpv4)) {
+    return true;
+  }
+
   return (
     normalized === "::1" ||
     normalized === "::" ||
@@ -61,14 +139,15 @@ export function isPublicAddress(address: string, family: 4 | 6): boolean {
 
 export async function resolvePublicAddresses(
   hostname: string,
-  lookup = dns.lookup
+  lookup = dns.lookup,
+  addressPolicy = isPublicAddress
 ): Promise<ResolvedAddress[]> {
   const results = await lookup(hostname, { all: true, verbatim: true });
   const addresses = results
     .filter((entry) => entry.family === 4 || entry.family === 6)
     .map((entry) => ({ address: entry.address, family: entry.family as 4 | 6 }));
 
-  if (addresses.length === 0 || addresses.some((entry) => !isPublicAddress(entry.address, entry.family))) {
+  if (addresses.length === 0 || addresses.some((entry) => !addressPolicy(entry.address, entry.family))) {
     throw new Error("Blocked stream host");
   }
 
@@ -99,19 +178,30 @@ function requestOnce(
         },
         lookup: (_hostname, options, callback) => {
           const family = options.family === 6 ? 6 : options.family === 4 ? 4 : undefined;
-          const selected = family ? addressByFamily.get(family) : addresses[0]?.address;
-          const selectedEntry = addresses.find((entry) => entry.address === selected);
-          if (!selectedEntry) {
+          const selectedEntries = family
+            ? addresses.filter((entry) => entry.family === family)
+            : addresses;
+          if (selectedEntries.length === 0) {
             callback(new Error("No validated public address available"), "", 0);
             return;
           }
-          usedFamily = selectedEntry.family;
-          callback(null, selectedEntry.address, selectedEntry.family);
+
+          usedFamily = selectedEntries[0].family;
+          if (options.all) {
+            callback(
+              null,
+              selectedEntries.map((entry) => ({ address: entry.address, family: entry.family }))
+            );
+          } else {
+            const selected = selectedEntries[0];
+            callback(null, selected.address, selected.family);
+          }
         },
         timeout: REQUEST_TIMEOUT_MS,
       },
       (response) => {
-        if (!usedFamily || !isPublicAddress(addresses.find((entry) => entry.family === usedFamily)!.address, usedFamily)) {
+        const usedAddress = addresses.find((entry) => entry.family === usedFamily);
+        if (!usedFamily || !usedAddress || !isPublicAddress(usedAddress.address, usedFamily)) {
           response.destroy(new Error("Blocked stream host"));
           reject(new Error("Blocked stream host"));
           return;
@@ -134,8 +224,11 @@ function requestOnce(
 
 export async function openStreamProxy(
   rawUrl: string,
-  signal: AbortSignal
+  signal: AbortSignal,
+  dependencies: StreamProxyDependencies = {}
 ): Promise<StreamProxyResult> {
+  const lookup = dependencies.lookup ?? dns.lookup;
+  const addressPolicy = dependencies.isPublicAddress ?? isPublicAddress;
   let currentUrl = rawUrl;
 
   for (let redirect = 0; redirect <= MAX_REDIRECTS; redirect += 1) {
@@ -147,10 +240,14 @@ export async function openStreamProxy(
     const parsed = new URL(validated.url);
     let addresses: ResolvedAddress[];
     try {
-      addresses = await resolvePublicAddresses(parsed.hostname);
+      addresses = await resolvePublicAddresses(parsed.hostname, lookup, addressPolicy);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      return { ok: false, status: 400, error: message === "Blocked stream host" ? message : "Unable to resolve stream host" };
+      return {
+        ok: false,
+        status: 400,
+        error: message === "Blocked stream host" ? message : "Unable to resolve stream host",
+      };
     }
 
     let response: http.IncomingMessage;
