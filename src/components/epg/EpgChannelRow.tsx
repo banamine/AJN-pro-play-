@@ -1,4 +1,4 @@
-import type { EpgChannelSchedule, EpgProgram, TimeProvider } from "../../types/guide";
+import type { EpgChannelSchedule, EpgProgram, TimeProvider } from "../../../types/guide";
 import { projectChannelSchedule } from "../../guide/projection";
 import { EpgProgramTile } from "./EpgProgramTile";
 import { getVisiblePrograms, type TimelineWindow } from "./timeline-geometry";
