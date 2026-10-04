@@ -82,7 +82,14 @@ export function RumbleTVStationView({
   onSelectChannel,
 }: RumbleTVStationViewProps) {
   const [previewProgram, setPreviewProgram] = useState<EpgProgram | null>(null);
+  const [clockEpoch, setClockEpoch] = useState(() => Date.now());
   const [isPinned, setIsPinned] = useState(false);
+
+  // Keep the guide's coarse time window moving while the station stays mounted.
+  useEffect(() => {
+    const interval = window.setInterval(() => setClockEpoch(Date.now()), 30_000);
+    return () => window.clearInterval(interval);
+  }, []);
   const [activeFocusRegion, setActiveFocusRegion] =
     useState<FocusRegion>("carousel");
   const playerAnchorRef = useRef<HTMLDivElement | null>(null);
@@ -96,22 +103,21 @@ export function RumbleTVStationView({
   );
 
   const guideWindow = useMemo(() => {
-    const center = timeProvider.now();
     const halfWindow = GUIDE_WINDOW_MS / 2;
     return {
-      windowStartEpoch: center - halfWindow,
-      windowEndEpoch: center + halfWindow,
+      windowStartEpoch: clockEpoch - halfWindow,
+      windowEndEpoch: clockEpoch + halfWindow,
     };
-  }, [timeProvider]);
+  }, [clockEpoch]);
 
   const epgChannels = useMemo<EpgChannel[]>(
     () =>
       channels.map((channel) => ({
         id: channel.id,
         title: channel.cleanTitle,
-        schedule: adaptRumbleStateToEpgSchedule(channel, timeProvider.now()),
+        schedule: adaptRumbleStateToEpgSchedule(channel, clockEpoch),
       })),
-    [channels, timeProvider],
+    [channels, clockEpoch],
   );
 
   useEffect(() => {
